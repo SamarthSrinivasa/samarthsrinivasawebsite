@@ -129,38 +129,123 @@ Some guy kept throwing popcorn at me tho` },
     });
   }
 
+  var SORT_OPTIONS = [
+    { id: 'newest', label: 'newest' },
+    { id: 'oldest', label: 'oldest' },
+    { id: 'rating', label: 'top rated' },
+    { id: 'title', label: 'title a–z' }
+  ];
+
+  var state = { query: '', sort: 'newest', years: new Set() };
+
+  function yearsInLibrary() {
+    var seen = {};
+    FILMS.forEach(function (f) { seen[f.watched.slice(0, 4)] = true; });
+    return Object.keys(seen).sort().reverse();
+  }
+
+  function sortFilms(list) {
+    var arr = list.slice();
+    if (state.sort === 'newest') {
+      arr.sort(function (a, b) { return b.watched < a.watched ? -1 : b.watched > a.watched ? 1 : 0; });
+    } else if (state.sort === 'oldest') {
+      arr.sort(function (a, b) { return a.watched < b.watched ? -1 : a.watched > b.watched ? 1 : 0; });
+    } else if (state.sort === 'rating') {
+      arr.sort(function (a, b) { return b.rating - a.rating || (b.watched < a.watched ? -1 : 1); });
+    } else if (state.sort === 'title') {
+      arr.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    }
+    return arr;
+  }
+
+  function filteredFilms() {
+    var q = state.query.trim().toLowerCase();
+    var filtered = FILMS.filter(function (f) {
+      if (q && f.name.toLowerCase().indexOf(q) === -1) return false;
+      if (state.years.size && !state.years.has(f.watched.slice(0, 4))) return false;
+      return true;
+    });
+    return sortFilms(filtered);
+  }
+
+  function renderList() {
+    var listEl = document.getElementById('filmList');
+    var emptyEl = document.getElementById('filmsEmpty');
+    if (!listEl) return;
+    var films = filteredFilms();
+    listEl.innerHTML = films.map(filmCardHtml).join('');
+    bindReadMore(listEl);
+    if (emptyEl) emptyEl.style.display = films.length ? 'none' : '';
+  }
+
+  function buildControls() {
+    var controlsEl = document.getElementById('filmsControls');
+    if (!controlsEl) return;
+
+    var sortGroup = document.createElement('div');
+    sortGroup.className = 'films-control-group';
+    var sortLabel = document.createElement('span');
+    sortLabel.className = 'films-control-label';
+    sortLabel.textContent = 'sort';
+    sortGroup.appendChild(sortLabel);
+
+    var sortBtns = [];
+    SORT_OPTIONS.forEach(function (opt) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'film-toggle-btn' + (opt.id === state.sort ? ' active' : '');
+      btn.textContent = opt.label;
+      btn.addEventListener('click', function () {
+        state.sort = opt.id;
+        sortBtns.forEach(function (b) { b.classList.toggle('active', b === btn); });
+        renderList();
+      });
+      sortBtns.push(btn);
+      sortGroup.appendChild(btn);
+    });
+
+    var yearGroup = document.createElement('div');
+    yearGroup.className = 'films-control-group';
+    var yearLabel = document.createElement('span');
+    yearLabel.className = 'films-control-label';
+    yearLabel.textContent = 'ranked in';
+    yearGroup.appendChild(yearLabel);
+
+    yearsInLibrary().forEach(function (year) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'film-toggle-btn';
+      btn.textContent = year;
+      btn.addEventListener('click', function () {
+        if (state.years.has(year)) { state.years.delete(year); btn.classList.remove('active'); }
+        else { state.years.add(year); btn.classList.add('active'); }
+        renderList();
+      });
+      yearGroup.appendChild(btn);
+    });
+
+    controlsEl.appendChild(sortGroup);
+    controlsEl.appendChild(yearGroup);
+  }
+
   function render() {
     var listEl = document.getElementById('filmList');
     var statsEl = document.getElementById('filmsStats');
     var creditEl = document.getElementById('filmsCredit');
+    var searchEl = document.getElementById('filmsSearch');
     if (!listEl) return;
 
-    var sorted = FILMS.slice().sort(function (a, b) { return b.watched < a.watched ? -1 : b.watched > a.watched ? 1 : 0; });
-    var avg = sorted.reduce(function (sum, f) { return sum + f.rating; }, 0) / sorted.length;
+    var avg = FILMS.reduce(function (sum, f) { return sum + f.rating; }, 0) / FILMS.length;
+    if (statsEl) statsEl.textContent = FILMS.length + ' films logged · avg ' + avg.toFixed(1) + ' ★';
+    if (creditEl) creditEl.href = 'https://letterboxd.com/' + LETTERBOXD_USERNAME + '/';
 
-    if (statsEl) {
-      statsEl.textContent = sorted.length + ' films logged · avg ' + avg.toFixed(1) + ' ★';
-    }
-    if (creditEl) {
-      creditEl.href = 'https://letterboxd.com/' + LETTERBOXD_USERNAME + '/';
-    }
+    buildControls();
+    renderList();
 
-    listEl.innerHTML = sorted.map(filmCardHtml).join('');
-    bindReadMore(listEl);
-
-    var searchEl = document.getElementById('filmsSearch');
     if (searchEl) {
       searchEl.addEventListener('input', function () {
-        var q = searchEl.value.trim().toLowerCase();
-        var cards = listEl.querySelectorAll('.film-card');
-        var visible = 0;
-        Array.prototype.forEach.call(cards, function (card) {
-          var match = card.getAttribute('data-title').indexOf(q) !== -1;
-          card.style.display = match ? '' : 'none';
-          if (match) visible++;
-        });
-        var emptyEl = document.getElementById('filmsEmpty');
-        if (emptyEl) emptyEl.style.display = visible ? 'none' : '';
+        state.query = searchEl.value;
+        renderList();
       });
     }
   }
