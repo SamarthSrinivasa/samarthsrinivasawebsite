@@ -466,14 +466,19 @@
     playersInput.addEventListener('input', render);
     targetInput.addEventListener('input', render);
 
-    // ---------- Algorithm 1: bounded coin-change DP (fewest chips to reach the target) ----------
+    // ---------- Algorithm 1: bounded coin-change DP (most chips, real stack) ----------
     // Each color can be used at most floor(available / players) times per player (that's the
     // most any single player could get if the color were split perfectly evenly). Within that
     // cap, find the combination of chips that reaches the highest value <= target using the
-    // fewest total chips -- the classic "minimum coin change" DP, extended with per-color caps
-    // (a bounded knapsack) instead of assuming unlimited chips of every denomination.
+    // MOST total chips -- a bounded-knapsack coin-change DP, but maximizing count instead of
+    // minimizing it. Minimizing would happily hand out a single big-denomination chip whenever
+    // one alone covers the target; maximizing forces a real spread across denominations instead.
     function solveAllocation(items, target) {
-      var dp = new Array(target + 1).fill(Infinity);
+      // Maximize chip count (not minimize it): a single big-denomination chip can often
+      // hit the target value alone, but that's a useless "stack" of one chip. Maximizing
+      // count instead forces a real mix of denominations, and naturally avoids burning
+      // the whole budget on one big chip when that would crowd out everything else.
+      var dp = new Array(target + 1).fill(-Infinity);
       var parentValue = new Array(target + 1).fill(-1);
       var parentItem = new Array(target + 1).fill(-1);
       dp[0] = 0;
@@ -482,7 +487,7 @@
         var value = item.chip.value;
         for (var rep = 0; rep < item.usableMax; rep++) {
           for (var v = target; v >= value; v--) {
-            if (dp[v - value] + 1 < dp[v]) {
+            if (dp[v - value] > -Infinity && dp[v - value] + 1 > dp[v]) {
               dp[v] = dp[v - value] + 1;
               parentValue[v] = v - value;
               parentItem[v] = idx;
@@ -493,7 +498,7 @@
 
       var bestV = 0;
       for (var v = target; v >= 0; v--) {
-        if (dp[v] < Infinity) { bestV = v; break; }
+        if (dp[v] > -Infinity) { bestV = v; break; }
       }
 
       var counts = items.map(function () { return 0; });
@@ -503,7 +508,7 @@
         cur = parentValue[cur];
       }
 
-      return { achieved: bestV, counts: counts, totalChips: dp[bestV] === Infinity ? 0 : dp[bestV] };
+      return { achieved: bestV, counts: counts, totalChips: dp[bestV] <= -Infinity ? 0 : dp[bestV] };
     }
 
     // ---------- Algorithm 2: round-robin remainder distribution ----------
@@ -615,8 +620,8 @@
 
       algoEl.innerHTML =
         '<div class="algo-block">' +
-          '<p class="algo-name">1. Bounded coin-change DP (minimum chips per player)</p>' +
-          '<p class="algo-desc">Each color can only be used up to <code>floor(available &divide; players)</code> times per player — that’s the most any single player could get if that color were split perfectly evenly (' + capNote + '). Within those caps, a dynamic-programming search over every reachable value from 0 up to ' + target + ' bb finds the combination that reaches the highest value without going over, using the fewest total chips. Result: <strong>' + usedList + '</strong> = ' + solved.achieved + ' bb in ' + solved.totalChips + ' chip' + (solved.totalChips === 1 ? '' : 's') + '.</p>' +
+          '<p class="algo-name">1. Bounded coin-change DP (most chips, real stack)</p>' +
+          '<p class="algo-desc">Each color can only be used up to <code>floor(available &divide; players)</code> times per player — that’s the most any single player could get if that color were split perfectly evenly (' + capNote + '). Within those caps, a dynamic-programming search over every reachable value from 0 up to ' + target + ' bb finds the combination that reaches the highest value without going over, using as many chips as possible rather than as few — so a single big-denomination chip doesn’t crowd out a real mix of denominations. Result: <strong>' + usedList + '</strong> = ' + solved.achieved + ' bb in ' + solved.totalChips + ' chip' + (solved.totalChips === 1 ? '' : 's') + '.</p>' +
         '</div>' +
         '<div class="algo-block">' +
           '<p class="algo-name">2. Round-robin remainder distribution</p>' +

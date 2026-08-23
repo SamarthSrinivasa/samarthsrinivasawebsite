@@ -49,7 +49,7 @@
   // ---------- Routing ----------
   var views = Array.prototype.slice.call(document.querySelectorAll('.view'));
   var navLinks = Array.prototype.slice.call(document.querySelectorAll('.nav-link'));
-  var validRoutes = ['home', 'about', 'projects'];
+  var validRoutes = ['home', 'about', 'projects', 'films'];
 
   function showRoute(route) {
     if (validRoutes.indexOf(route) === -1) route = 'home';

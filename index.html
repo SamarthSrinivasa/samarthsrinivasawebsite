@@ -29,6 +29,7 @@
       <a href="#home" class="nav-link" data-route="home">Home</a>
       <a href="#about" class="nav-link" data-route="about">About</a>
       <a href="#projects" class="nav-link" data-route="projects">Projects</a>
+      <a href="#films" class="nav-link" data-route="films">Films</a>
     </nav>
 
     <div class="theme-toggle" role="group" aria-label="Theme">
@@ -79,8 +80,24 @@
         </ul>
       </div>
     </section>
+
+    <section id="view-films" class="view">
+      <div class="page-content">
+        <h2 class="section-title">Films</h2>
+        <div class="films-intro">
+          <span class="films-stats" id="filmsStats"></span>
+          <input type="text" class="films-search" id="filmsSearch" placeholder="filter by title…" />
+        </div>
+        <div class="film-list" id="filmList"></div>
+        <p class="film-empty" id="filmsEmpty" style="display:none;">no films match that filter</p>
+        <p class="films-stats" style="margin-top:18px;">
+          logged on <a id="filmsCredit" href="https://letterboxd.com" target="_blank" rel="noopener">Letterboxd</a>
+        </p>
+      </div>
+    </section>
   </main>
 
   <script src="script.js"></script>
+  <script src="films.js"></script>
 </body>
 </html>
