@@ -21,6 +21,20 @@
     document.documentElement.setAttribute('data-theme-pref', mode);
   })();
 </script>
+<script>
+  // Apply saved display customizations before paint to avoid a flash of default styling
+  (function () {
+    var root = document.documentElement;
+    var text = localStorage.getItem('displayTextColor');
+    var bg = localStorage.getItem('displayBgColor');
+    var font = localStorage.getItem('displayFont');
+    var size = localStorage.getItem('displayFontSize');
+    if (text) root.style.setProperty('--text', text);
+    if (bg) root.style.setProperty('--bg', bg);
+    if (font) root.style.setProperty('--font-body', font);
+    if (size) root.style.fontSize = size + '%';
+  })();
+</script>
 <style>
   body { min-height: 100vh; }
 
@@ -359,7 +373,7 @@
         <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="12" y1="1.5" x2="12" y2="4.5"/><line x1="12" y1="19.5" x2="12" y2="22.5"/><line x1="1.5" y1="12" x2="4.5" y2="12"/><line x1="19.5" y1="12" x2="22.5" y2="12"/><line x1="4.4" y1="4.4" x2="6.5" y2="6.5"/><line x1="17.5" y1="17.5" x2="19.6" y2="19.6"/><line x1="4.4" y1="19.6" x2="6.5" y2="17.5"/><line x1="17.5" y1="6.5" x2="19.6" y2="4.4"/></g></svg>
       </button>
       <button class="theme-btn" data-mode="dark" aria-label="Dark mode" title="Dark">
-        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M20.7 14.9A8.6 8.6 0 0 1 9.1 3.3a.7.7 0 0 0-.9-.9 9.9 9.9 0 1 0 13.4 13.4.7.7 0 0 0-.9-.9Z"/></svg>
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" transform="translate(2.2,-2.1)" d="M20.7 14.9A8.6 8.6 0 0 1 9.1 3.3a.7.7 0 0 0-.9-.9 9.9 9.9 0 1 0 13.4 13.4.7.7 0 0 0-.9-.9Z"/></svg>
       </button>
       <button class="theme-btn" data-mode="system" aria-label="System preference" title="System">
         <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="8" y1="20" x2="16" y2="20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="12" y1="16.5" x2="12" y2="20" stroke="currentColor" stroke-width="1.6"/></svg>
@@ -1199,5 +1213,6 @@
     window.requestAnimationFrame(function () { applyMode(initialMode, false); });
   })();
   </script>
+  <script src="../display-settings.js"></script>
 </body>
 </html>

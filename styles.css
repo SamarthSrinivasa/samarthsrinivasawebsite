@@ -150,6 +150,121 @@ a { color: inherit; }
   transition: transform 0.28s cubic-bezier(.4,0,.2,1);
 }
 
+/* ---------- Topbar right group / display settings ---------- */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.display-settings {
+  position: relative;
+}
+
+.display-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+.display-btn:hover { color: var(--text); border-color: var(--accent); }
+.display-btn.active { color: var(--accent); border-color: var(--accent); }
+
+.display-btn-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.display-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 250px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+  z-index: 30;
+}
+.display-panel[hidden] { display: none; }
+
+.display-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: lowercase;
+  color: var(--text-muted);
+}
+
+.display-field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.display-field input[type="color"] {
+  width: 40px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.display-field select {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+.display-field input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.display-size-readout {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text);
+  min-width: 34px;
+  text-align: right;
+}
+
+.display-reset-btn {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+.display-reset-btn:hover { color: var(--accent); border-color: var(--accent); }
+
 /* ---------- Views ---------- */
 main { position: relative; }
 
