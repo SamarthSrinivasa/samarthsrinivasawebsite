@@ -21,20 +21,7 @@
     document.documentElement.setAttribute('data-theme-pref', mode);
   })();
 </script>
-<script>
-  // Apply saved display customizations before paint to avoid a flash of default styling
-  (function () {
-    var root = document.documentElement;
-    var text = localStorage.getItem('displayTextColor');
-    var bg = localStorage.getItem('displayBgColor');
-    var font = localStorage.getItem('displayFont');
-    var size = localStorage.getItem('displayFontSize');
-    if (text) root.style.setProperty('--text', text);
-    if (bg) root.style.setProperty('--bg', bg);
-    if (font) root.style.setProperty('--font-body', font);
-    if (size) root.style.fontSize = size + '%';
-  })();
-</script>
+<script src="display-settings.js"></script>
 </head>
 <body>
 
@@ -113,6 +100,5 @@
 
   <script src="script.js"></script>
   <script src="films.js"></script>
-  <script src="display-settings.js"></script>
 </body>
 </html>
