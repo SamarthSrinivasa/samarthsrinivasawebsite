@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Poker Chip Calculator — Samarth</title>
+<meta name="description" content="Split a fixed poker chip supply evenly across players to hit a target big blind stack, with the allocation algorithm shown." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..700,0..100,0..1&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css" />
+<script>
+  (function () {
+    var stored = localStorage.getItem('theme');
+    var mode = stored || 'system';
+    var resolved = mode === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : mode;
+    document.documentElement.setAttribute('data-theme', resolved);
+    document.documentElement.setAttribute('data-theme-pref', mode);
+  })();
+</script>
+<style>
+  body { min-height: 100vh; }
+
+  .chip-page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: clamp(32px, 6vh, 72px) clamp(20px, 6vw, 64px) 80px;
+  }
+
+  .chip-title {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-variation-settings: "opsz" 40;
+    font-size: clamp(1.9rem, 5vw, 2.5rem);
+    margin: 22px 0 6px;
+  }
+
+  .chip-sub {
+    font-size: 0.98rem;
+    line-height: 1.55;
+    color: var(--text-muted);
+    margin: 0 0 34px;
+    max-width: 60ch;
+  }
+
+  .chip-panel {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-elevated);
+    padding: clamp(18px, 4vw, 30px);
+    margin-bottom: 24px;
+  }
+
+  .panel-title {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 16px;
+  }
+
+  .setup-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-bottom: 22px;
+  }
+
+  .control {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: lowercase;
+    color: var(--text-muted);
+  }
+
+  .control input {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 9px;
+    width: 96px;
+  }
+
+  .preset-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 2px;
+  }
+
+  .preset-btn {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--text-muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .preset-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .preset-btn.active { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+
+  .chip-table {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .chip-row {
+    display: grid;
+    grid-template-columns: 20px 1fr 90px 90px 26px;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .chip-row-head {
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .chip-row-head span:first-child { grid-column: 2; }
+
+  .swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    box-shadow: inset 0 0 0 3px var(--bg-elevated);
+    cursor: pointer;
+  }
+
+  .chip-row input[type="text"],
+  .chip-row input[type="number"] {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    width: 100%;
+  }
+
+  .remove-chip-btn {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px;
+  }
+  .remove-chip-btn:hover { color: var(--accent); }
+
+  .add-chip-btn {
+    align-self: flex-start;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .add-chip-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .result-headline {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+
+  .result-value {
+    font-family: var(--font-display);
+    font-size: 2.1rem;
+    font-variation-settings: "opsz" 40;
+  }
+
+  .result-value.short { color: #c96a4a; }
+  .result-value.exact { color: var(--accent); }
+
+  .result-note {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--text-muted);
+  }
+
+  .per-player-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .chip-chip {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 5px 12px 5px 8px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    background: var(--bg);
+  }
+
+  .chip-chip .swatch { cursor: default; width: 14px; height: 14px; }
+
+  .bank-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+  }
+  .bank-table th, .bank-table td {
+    text-align: left;
+    padding: 6px 10px 6px 0;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .bank-table td:first-child, .bank-table th:first-child { color: var(--text); }
+
+  .bonus-note {
+    margin-top: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+
+  .algo-block {
+    margin-top: 4px;
+  }
+
+  .algo-name {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--accent);
+    margin: 0 0 4px;
+  }
+
+  .algo-desc {
+    font-size: 0.92rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin: 0 0 18px;
+  }
+  .algo-block:last-child .algo-desc { margin-bottom: 0; }
+
+  .algo-desc code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  .warn-text { color: #c96a4a; }
+</style>
+</head>
+<body>
+
+  <header class="topbar">
+    <nav class="nav" aria-label="Primary">
+      <a href="../index.html#home" class="nav-link">Home</a>
+      <a href="../index.html#about" class="nav-link">About</a>
+      <a href="../index.html#projects" class="nav-link active">Projects</a>
+    </nav>
+
+    <div class="theme-toggle" role="group" aria-label="Theme">
+      <button class="theme-btn" data-mode="light" aria-label="Light mode" title="Light">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="12" y1="1.5" x2="12" y2="4.5"/><line x1="12" y1="19.5" x2="12" y2="22.5"/><line x1="1.5" y1="12" x2="4.5" y2="12"/><line x1="19.5" y1="12" x2="22.5" y2="12"/><line x1="4.4" y1="4.4" x2="6.5" y2="6.5"/><line x1="17.5" y1="17.5" x2="19.6" y2="19.6"/><line x1="4.4" y1="19.6" x2="6.5" y2="17.5"/><line x1="17.5" y1="6.5" x2="19.6" y2="4.4"/></g></svg>
+      </button>
+      <button class="theme-btn" data-mode="dark" aria-label="Dark mode" title="Dark">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M20.7 14.9A8.6 8.6 0 0 1 9.1 3.3a.7.7 0 0 0-.9-.9 9.9 9.9 0 1 0 13.4 13.4.7.7 0 0 0-.9-.9Z"/></svg>
+      </button>
+      <button class="theme-btn" data-mode="system" aria-label="System preference" title="System">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="8" y1="20" x2="16" y2="20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="12" y1="16.5" x2="12" y2="20" stroke="currentColor" stroke-width="1.6"/></svg>
+      </button>
+      <span class="theme-indicator" aria-hidden="true"></span>
+    </div>
+  </header>
+
+  <div class="chip-page">
+    <h1 class="chip-title">Poker Chip Calculator</h1>
+    <p class="chip-sub">
+      Tell it how many players you've got and how many of each chip color you own. It splits your actual
+      inventory evenly across the table and works out the biggest exact stack it can build per player toward
+      your big blind target — using the same chip supply you've actually got, not an idealized one.
+    </p>
+
+    <div class="chip-panel">
+      <p class="panel-title">setup</p>
+      <div class="setup-row">
+        <label class="control">
+          players
+          <input type="number" id="players" min="1" step="1" value="8" />
+        </label>
+
+        <label class="control">
+          target big blinds
+          <input type="number" id="targetBB" min="1" step="1" value="100" />
+          <div class="preset-row" id="presetRow"></div>
+        </label>
+      </div>
+
+      <p class="panel-title">chips you have (value is in big blinds per chip)</p>
+      <div class="chip-row chip-row-head">
+        <span></span>
+        <span>color</span>
+        <span>value (bb)</span>
+        <span>have</span>
+        <span></span>
+      </div>
+      <div class="chip-table" id="chipTable"></div>
+      <button type="button" class="add-chip-btn" id="addChipBtn">+ add a chip color</button>
+    </div>
+
+    <div class="chip-panel">
+      <p class="panel-title">per player</p>
+      <div class="result-headline">
+        <span class="result-value" id="resultValue">—</span>
+        <span class="result-note" id="resultNote"></span>
+      </div>
+      <div class="per-player-list" id="perPlayerList"></div>
+      <div class="bonus-note" id="bonusNote"></div>
+    </div>
+
+    <div class="chip-panel">
+      <p class="panel-title">left in the bank after dealing everyone in</p>
+      <table class="bank-table" id="bankTable"></table>
+    </div>
+
+    <div class="chip-panel">
+      <p class="panel-title">algorithms used</p>
+      <div id="algoExplain"></div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    var DEFAULT_CHIPS = [
+      { name: 'white', color: '#f4f1e8', value: 1,   available: 70 },
+      { name: 'red',   color: '#c0392b', value: 5,   available: 70 },
+      { name: 'blue',  color: '#2d6cdf', value: 10,  available: 70 },
+      { name: 'green', color: '#2e8b57', value: 25,  available: 70 },
+      { name: 'black', color: '#1b1f1b', value: 100, available: 70 }
+    ];
+
+    var PRESETS = [100, 150, 200, 300];
+
+    var chips = DEFAULT_CHIPS.map(function (c) { return Object.assign({}, c); });
+
+    var chipTableEl = document.getElementById('chipTable');
+    var playersInput = document.getElementById('players');
+    var targetInput = document.getElementById('targetBB');
+    var presetRowEl = document.getElementById('presetRow');
+
+    function buildPresets() {
+      PRESETS.forEach(function (p) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'preset-btn';
+        btn.textContent = p;
+        btn.addEventListener('click', function () {
+          targetInput.value = p;
+          render();
+        });
+        presetRowEl.appendChild(btn);
+      });
+    }
+
+    function syncPresetActive() {
+      var val = parseInt(targetInput.value, 10);
+      Array.prototype.forEach.call(presetRowEl.children, function (btn) {
+        btn.classList.toggle('active', parseInt(btn.textContent, 10) === val);
+      });
+    }
+
+    function buildChipTable() {
+      chipTableEl.innerHTML = '';
+      chips.forEach(function (chip, idx) {
+        var row = document.createElement('div');
+        row.className = 'chip-row';
+
+        var swatch = document.createElement('input');
+        swatch.type = 'color';
+        swatch.className = 'swatch';
+        swatch.value = chip.color;
+        swatch.addEventListener('input', function () { chip.color = swatch.value; render(); });
+
+        var nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = chip.name;
+        nameInput.addEventListener('input', function () { chip.name = nameInput.value; render(); });
+
+        var valueInput = document.createElement('input');
+        valueInput.type = 'number';
+        valueInput.min = '1';
+        valueInput.step = '1';
+        valueInput.value = chip.value;
+        valueInput.addEventListener('input', function () {
+          chip.value = Math.max(1, parseInt(valueInput.value, 10) || 1);
+          render();
+        });
+
+        var availInput = document.createElement('input');
+        availInput.type = 'number';
+        availInput.min = '0';
+        availInput.step = '1';
+        availInput.value = chip.available;
+        availInput.addEventListener('input', function () {
+          chip.available = Math.max(0, parseInt(availInput.value, 10) || 0);
+          render();
+        });
+
+        var removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'remove-chip-btn';
+        removeBtn.textContent = '✕';
+        removeBtn.title = 'remove this color';
+        removeBtn.addEventListener('click', function () {
+          chips.splice(idx, 1);
+          buildChipTable();
+          render();
+        });
+
+        row.appendChild(swatch);
+        row.appendChild(nameInput);
+        row.appendChild(valueInput);
+        row.appendChild(availInput);
+        row.appendChild(removeBtn);
+        chipTableEl.appendChild(row);
+      });
+    }
+
+    document.getElementById('addChipBtn').addEventListener('click', function () {
+      chips.push({ name: 'chip', color: '#8a8f89', value: 1, available: 0 });
+      buildChipTable();
+      render();
+    });
+
+    playersInput.addEventListener('input', render);
+    targetInput.addEventListener('input', render);
+
+    // ---------- Algorithm 1: bounded coin-change DP (fewest chips to reach the target) ----------
+    // Each color can be used at most floor(available / players) times per player (that's the
+    // most any single player could get if the color were split perfectly evenly). Within that
+    // cap, find the combination of chips that reaches the highest value <= target using the
+    // fewest total chips -- the classic "minimum coin change" DP, extended with per-color caps
+    // (a bounded knapsack) instead of assuming unlimited chips of every denomination.
+    function solveAllocation(items, target) {
+      var dp = new Array(target + 1).fill(Infinity);
+      var parentValue = new Array(target + 1).fill(-1);
+      var parentItem = new Array(target + 1).fill(-1);
+      dp[0] = 0;
+
+      items.forEach(function (item, idx) {
+        var value = item.chip.value;
+        for (var rep = 0; rep < item.usableMax; rep++) {
+          for (var v = target; v >= value; v--) {
+            if (dp[v - value] + 1 < dp[v]) {
+              dp[v] = dp[v - value] + 1;
+              parentValue[v] = v - value;
+              parentItem[v] = idx;
+            }
+          }
+        }
+      });
+
+      var bestV = 0;
+      for (var v = target; v >= 0; v--) {
+        if (dp[v] < Infinity) { bestV = v; break; }
+      }
+
+      var counts = items.map(function () { return 0; });
+      var cur = bestV;
+      while (cur > 0 && parentItem[cur] !== -1) {
+        counts[parentItem[cur]]++;
+        cur = parentValue[cur];
+      }
+
+      return { achieved: bestV, counts: counts, totalChips: dp[bestV] === Infinity ? 0 : dp[bestV] };
+    }
+
+    // ---------- Algorithm 2: round-robin remainder distribution ----------
+    // When a color is used at its full per-player cap (supply is the bottleneck for that color),
+    // available[color] usually doesn't divide evenly by the player count. The leftover 0..players-1
+    // chips get handed out one at a time to a rotating slice of players (offset by that color's
+    // index in the list) so the "extra chip" doesn't always land on the same players when several
+    // colors are supply-constrained at once.
+    function assignBonusPlayers(remainder, players, offset) {
+      var out = [];
+      for (var i = 0; i < remainder; i++) out.push((offset + i) % players);
+      return out;
+    }
+
+    function render() {
+      var players = Math.max(1, parseInt(playersInput.value, 10) || 1);
+      var target = Math.max(1, parseInt(targetInput.value, 10) || 1);
+      syncPresetActive();
+
+      var items = chips.map(function (chip) {
+        var maxPerPlayer = Math.floor(chip.available / players);
+        return {
+          chip: chip,
+          maxPerPlayer: maxPerPlayer,
+          remainder: chip.available - maxPerPlayer * players,
+          usableMax: Math.min(maxPerPlayer, Math.floor(target / chip.value))
+        };
+      }).filter(function (it) { return it.chip.value > 0; });
+
+      var solved = solveAllocation(items, target);
+
+      // ---------- Result headline ----------
+      var resultValueEl = document.getElementById('resultValue');
+      var resultNoteEl = document.getElementById('resultNote');
+      var capacity = items.reduce(function (sum, it) { return sum + it.maxPerPlayer * it.chip.value; }, 0);
+
+      resultValueEl.textContent = solved.achieved + ' / ' + target + ' bb';
+      if (solved.achieved >= target) {
+        resultValueEl.className = 'result-value exact';
+        resultNoteEl.textContent = 'exact, using ' + solved.totalChips + ' chip' + (solved.totalChips === 1 ? '' : 's') + ' per player';
+      } else if (capacity < target) {
+        resultValueEl.className = 'result-value short';
+        resultNoteEl.textContent = 'supply-limited — max possible per player with this inventory is ' + capacity + ' bb';
+      } else {
+        resultValueEl.className = 'result-value short';
+        resultNoteEl.textContent = 'closest reachable value with these denominations (target isn’t exactly representable)';
+      }
+
+      // ---------- Per-player chip list ----------
+      var perPlayerListEl = document.getElementById('perPlayerList');
+      perPlayerListEl.innerHTML = '';
+      var anyChips = false;
+      items.forEach(function (it, idx) {
+        if (solved.counts[idx] <= 0) return;
+        anyChips = true;
+        var pill = document.createElement('div');
+        pill.className = 'chip-chip';
+        var sw = document.createElement('span');
+        sw.className = 'swatch';
+        sw.style.background = it.chip.color;
+        var label = document.createElement('span');
+        label.textContent = solved.counts[idx] + '× ' + it.chip.name + ' (' + (solved.counts[idx] * it.chip.value) + ' bb)';
+        pill.appendChild(sw);
+        pill.appendChild(label);
+        perPlayerListEl.appendChild(pill);
+      });
+      if (!anyChips) {
+        perPlayerListEl.innerHTML = '<span class="result-note">no chips available to allocate — add some inventory above</span>';
+      }
+
+      // ---------- Bonus / leftover-remainder players ----------
+      var bonusNoteEl = document.getElementById('bonusNote');
+      var bonusLines = [];
+      items.forEach(function (it, idx) {
+        var isMaxed = it.maxPerPlayer > 0 && solved.counts[idx] === it.maxPerPlayer;
+        if (isMaxed && it.remainder > 0) {
+          var lucky = assignBonusPlayers(it.remainder, players, idx).map(function (p) { return p + 1; });
+          bonusLines.push(
+            it.chip.name + ': ' + it.chip.available + ' ÷ ' + players + ' = ' + it.maxPerPlayer +
+            ' r' + it.remainder + ' — player' + (lucky.length > 1 ? 's' : '') + ' ' + lucky.join(', ') +
+            ' get' + (lucky.length > 1 ? '' : 's') + ' one extra ' + it.chip.name + ' chip'
+          );
+        }
+      });
+      bonusNoteEl.innerHTML = bonusLines.length
+        ? bonusLines.map(function (l) { return '<div>' + l + '</div>'; }).join('')
+        : '';
+
+      // ---------- Bank leftovers ----------
+      var bankTableEl = document.getElementById('bankTable');
+      var rows = '<tr><th>color</th><th>allocated / player</th><th>used total</th><th>left in bank</th></tr>';
+      items.forEach(function (it, idx) {
+        var used = solved.counts[idx] * players;
+        rows += '<tr><td>' + it.chip.name + '</td><td>' + solved.counts[idx] + '</td><td>' + used + ' / ' + it.chip.available + '</td><td>' + (it.chip.available - used) + '</td></tr>';
+      });
+      bankTableEl.innerHTML = rows;
+
+      // ---------- Algorithm explanation ----------
+      var algoEl = document.getElementById('algoExplain');
+      var usedList = items
+        .map(function (it, idx) { return { it: it, count: solved.counts[idx] }; })
+        .filter(function (entry) { return entry.count > 0; })
+        .map(function (entry) { return entry.count + '× ' + entry.it.chip.name; })
+        .join(', ') || 'nothing (no chips fit within supply)';
+
+      var capNote = items.map(function (it) {
+        return it.chip.name + ' capped at ' + it.maxPerPlayer + '/player (' + it.chip.available + ' ÷ ' + players + ')';
+      }).join('; ');
+
+      algoEl.innerHTML =
+        '<div class="algo-block">' +
+          '<p class="algo-name">1. Bounded coin-change DP (minimum chips per player)</p>' +
+          '<p class="algo-desc">Each color can only be used up to <code>floor(available &divide; players)</code> times per player — that’s the most any single player could get if that color were split perfectly evenly (' + capNote + '). Within those caps, a dynamic-programming search over every reachable value from 0 up to ' + target + ' bb finds the combination that reaches the highest value without going over, using the fewest total chips. Result: <strong>' + usedList + '</strong> = ' + solved.achieved + ' bb in ' + solved.totalChips + ' chip' + (solved.totalChips === 1 ? '' : 's') + '.</p>' +
+        '</div>' +
+        '<div class="algo-block">' +
+          '<p class="algo-name">2. Round-robin remainder distribution</p>' +
+          '<p class="algo-desc">' + (bonusLines.length
+            ? 'For every color that got maxed out (supply is the bottleneck), the leftover chips that don’t divide evenly across ' + players + ' players are handed out one at a time to a rotating slice of players, so the same players don’t always get the odd chip out when multiple colors run short: ' + bonusLines.join(' ')
+            : 'Not needed this round — no color hit its per-player supply cap, so nothing had to be split unevenly.') +
+          '</p>' +
+        '</div>';
+    }
+
+    buildPresets();
+    buildChipTable();
+    render();
+  })();
+  </script>
+
+  <script>
+  (function () {
+    var root = document.documentElement;
+    var mql = window.matchMedia('(prefers-color-scheme: dark)');
+    var themeButtons = Array.prototype.slice.call(document.querySelectorAll('.theme-btn'));
+    var indicator = document.querySelector('.theme-indicator');
+
+    function resolvedFromMode(mode) {
+      return mode === 'system' ? (mql.matches ? 'dark' : 'light') : mode;
+    }
+
+    function moveIndicator(btn) {
+      if (!indicator) return;
+      indicator.style.transform = 'translateX(' + btn.offsetLeft + 'px)';
+    }
+
+    function applyMode(mode, persist) {
+      root.setAttribute('data-theme-pref', mode);
+      root.setAttribute('data-theme', resolvedFromMode(mode));
+      if (persist) localStorage.setItem('theme', mode);
+      themeButtons.forEach(function (btn) {
+        var active = btn.getAttribute('data-mode') === mode;
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        if (active) moveIndicator(btn);
+      });
+    }
+
+    themeButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        applyMode(btn.getAttribute('data-mode'), true);
+      });
+    });
+
+    mql.addEventListener('change', function () {
+      if (root.getAttribute('data-theme-pref') === 'system') applyMode('system', false);
+    });
+
+    window.addEventListener('resize', function () {
+      var current = themeButtons.filter(function (b) { return b.getAttribute('aria-pressed') === 'true'; })[0];
+      if (current) moveIndicator(current);
+    });
+
+    var initialMode = root.getAttribute('data-theme-pref') || 'system';
+    window.requestAnimationFrame(function () { applyMode(initialMode, false); });
+  })();
+  </script>
+</body>
+</html>
