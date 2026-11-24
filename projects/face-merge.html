@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Face Merge — Samarth</title>
+<meta name="description" content="Upload two faces and see them merged — landmark detection, triangulation and warping, all in your browser." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..700,0..100,0..1&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css" />
+<script>
+  (function () {
+    var stored = localStorage.getItem('theme');
+    var mode = stored || 'system';
+    var resolved = mode === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : mode;
+    document.documentElement.setAttribute('data-theme', resolved);
+    document.documentElement.setAttribute('data-theme-pref', mode);
+  })();
+</script>
+<script src="../display-settings.js"></script>
+<style>
+  body { min-height: 100vh; }
+
+  .fm-page {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: clamp(32px, 6vh, 72px) clamp(20px, 6vw, 64px) 80px;
+  }
+
+  .fm-title {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-variation-settings: "opsz" 40;
+    font-size: clamp(1.9rem, 5vw, 2.5rem);
+    margin: 22px 0 6px;
+  }
+
+  .fm-sub {
+    font-size: 0.98rem;
+    line-height: 1.55;
+    color: var(--text-muted);
+    margin: 0 0 10px;
+    max-width: 62ch;
+  }
+
+  .fm-privacy {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--accent);
+    margin: 0 0 30px;
+    line-height: 1.6;
+  }
+
+  .fm-panel {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-elevated);
+    padding: clamp(18px, 4vw, 30px);
+    margin-bottom: 24px;
+  }
+
+  .panel-title {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 16px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .model-status { text-transform: lowercase; letter-spacing: 0.02em; }
+  .model-status.ok { color: var(--accent); }
+  .model-status.err, .slot-status.err { color: #c96a4a; }
+
+  .slots {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .slot {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .drop {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    overflow: hidden;
+    transition: border-color 0.15s ease;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop canvas { width: 100%; height: 100%; object-fit: contain; display: none; }
+  .drop.has-img canvas { display: block; }
+  .drop.has-img .drop-hint { display: none; }
+  .drop input { display: none; }
+
+  .drop-hint {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.7;
+    padding: 12px;
+  }
+  .drop-hint b { color: var(--text); font-weight: 500; font-size: 1.4rem; display: block; font-family: var(--font-display); }
+
+  .slot-status {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    min-height: 1.2em;
+  }
+
+  .result-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px;
+    gap: 24px;
+    align-items: start;
+  }
+
+  .result-canvas-box {
+    aspect-ratio: 1 / 1;
+    border-radius: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #result { width: 100%; height: 100%; display: none; }
+  .result-canvas-box.ready #result { display: block; }
+  .result-canvas-box.ready .result-empty { display: none; }
+  .result-empty {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    padding: 20px;
+    text-align: center;
+  }
+
+  .controls { display: flex; flex-direction: column; gap: 18px; }
+
+  .control {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: lowercase;
+    color: var(--text-muted);
+  }
+  .control-row { display: flex; justify-content: space-between; }
+  .control-row output { color: var(--text); }
+  .control input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .control input[type="range"]:disabled { opacity: 0.4; }
+
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .check input { accent-color: var(--accent); }
+
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .fm-btn {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .fm-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .fm-btn:disabled { opacity: 0.4; cursor: default; }
+
+  .how-step { margin: 0 0 16px; }
+  .how-step:last-child { margin-bottom: 0; }
+  .how-name { font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent); margin: 0 0 4px; }
+  .how-desc { font-size: 0.92rem; line-height: 1.6; color: var(--text-muted); margin: 0; }
+
+  @media (max-width: 640px) {
+    .result-wrap { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+  <header class="topbar">
+    <nav class="nav" aria-label="Primary">
+      <a href="../index.html#home" class="nav-link">Home</a>
+      <a href="../index.html#about" class="nav-link">About</a>
+      <a href="../index.html#projects" class="nav-link active">Projects</a>
+      <a href="../index.html#films" class="nav-link">Films</a>
+    </nav>
+
+    <div class="theme-toggle" role="group" aria-label="Theme">
+      <button class="theme-btn" data-mode="light" aria-label="Light mode" title="Light">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="12" y1="1.5" x2="12" y2="4.5"/><line x1="12" y1="19.5" x2="12" y2="22.5"/><line x1="1.5" y1="12" x2="4.5" y2="12"/><line x1="19.5" y1="12" x2="22.5" y2="12"/><line x1="4.4" y1="4.4" x2="6.5" y2="6.5"/><line x1="17.5" y1="17.5" x2="19.6" y2="19.6"/><line x1="4.4" y1="19.6" x2="6.5" y2="17.5"/><line x1="17.5" y1="6.5" x2="19.6" y2="4.4"/></g></svg>
+      </button>
+      <button class="theme-btn" data-mode="dark" aria-label="Dark mode" title="Dark">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" transform="translate(1.1,-1.05)" d="M20.7 14.9A8.6 8.6 0 0 1 9.1 3.3a.7.7 0 0 0-.9-.9 9.9 9.9 0 1 0 13.4 13.4.7.7 0 0 0-.9-.9Z"/></svg>
+      </button>
+      <button class="theme-btn" data-mode="system" aria-label="System preference" title="System">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="8" y1="20" x2="16" y2="20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="12" y1="16.5" x2="12" y2="20" stroke="currentColor" stroke-width="1.6"/></svg>
+      </button>
+      <span class="theme-indicator" aria-hidden="true"></span>
+    </div>
+  </header>
+
+  <div class="fm-page">
+    <h1 class="fm-title">Face Merge</h1>
+    <p class="fm-sub">
+      Drop in photos of two different people and see their faces merged into one. It finds 478 points on
+      each face, lines the faces up, averages their shape, warps both photos onto that shape, and blends them.
+    </p>
+    <p class="fm-privacy">
+      everything runs in your browser — photos are never uploaded or stored.<br />
+      only merge faces of people who are okay with it.
+    </p>
+
+    <div class="fm-panel">
+      <p class="panel-title"><span>faces</span><span class="model-status" id="modelStatus">loading face model…</span></p>
+      <div class="slots">
+        <div class="slot" data-slot="0">
+          <label class="drop" id="drop0">
+            <input type="file" accept="image/*,.heic,.heif" />
+            <canvas width="512" height="512"></canvas>
+            <span class="drop-hint"><b>A</b>click, drop or paste a photo</span>
+          </label>
+          <span class="slot-status" id="status0"></span>
+        </div>
+        <div class="slot" data-slot="1">
+          <label class="drop" id="drop1">
+            <input type="file" accept="image/*,.heic,.heif" />
+            <canvas width="512" height="512"></canvas>
+            <span class="drop-hint"><b>B</b>click, drop or paste a photo</span>
+          </label>
+          <span class="slot-status" id="status1"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="fm-panel">
+      <p class="panel-title"><span>merged</span></p>
+      <div class="result-wrap">
+        <div class="result-canvas-box" id="resultBox">
+          <canvas id="result" width="512" height="512"></canvas>
+          <span class="result-empty">add two faces to see the merge</span>
+        </div>
+        <div class="controls">
+          <label class="control">
+            <span class="control-row">blend <output id="blendOut">50%</output></span>
+            <input type="range" id="blend" min="0" max="100" value="50" />
+          </label>
+          <label class="check"><input type="checkbox" id="linkShape" checked /> shape follows blend</label>
+          <label class="control">
+            <span class="control-row">shape <output id="shapeOut">50%</output></span>
+            <input type="range" id="shape" min="0" max="100" value="50" disabled />
+          </label>
+          <label class="check"><input type="checkbox" id="showMesh" /> show mesh</label>
+          <label class="check"><input type="checkbox" id="crop" checked /> fade background</label>
+          <div class="btn-row">
+            <button class="fm-btn" id="swapBtn" disabled>swap a ↔ b</button>
+            <button class="fm-btn" id="downloadBtn" disabled>download png</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fm-panel">
+      <p class="panel-title"><span>how it works</span></p>
+      <div class="how-step">
+        <p class="how-name">1. landmarks</p>
+        <p class="how-desc">MediaPipe's face landmarker finds 478 points on each face: eyes, brows, nose, lips, jaw and face outline.</p>
+      </div>
+      <div class="how-step">
+        <p class="how-name">2. align</p>
+        <p class="how-desc">Each photo is rotated, scaled and shifted so both pairs of eyes land in the same spots on a 512×512 frame.</p>
+      </div>
+      <div class="how-step">
+        <p class="how-name">3. average + triangulate</p>
+        <p class="how-desc">The target shape is a weighted average of the two point sets. A Delaunay triangulation splits it into about a thousand triangles.</p>
+      </div>
+      <div class="how-step">
+        <p class="how-name">4. warp + blend</p>
+        <p class="how-desc">Every triangle in each photo gets its own affine transform onto the matching target triangle. The two warped photos are then cross-faded. The <em>shape</em> slider sets the geometry and <em>blend</em> sets the skin and color, so you can put A's skin on B's face shape.</p>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    var root = document.documentElement;
+    var mql = window.matchMedia('(prefers-color-scheme: dark)');
+    var themeButtons = Array.prototype.slice.call(document.querySelectorAll('.theme-btn'));
+    var indicator = document.querySelector('.theme-indicator');
+
+    function resolvedFromMode(mode) {
+      return mode === 'system' ? (mql.matches ? 'dark' : 'light') : mode;
+    }
+
+    function moveIndicator(btn) {
+      if (!indicator) return;
+      indicator.style.transform = 'translateX(' + btn.offsetLeft + 'px)';
+    }
+
+    function applyMode(mode, persist) {
+      root.setAttribute('data-theme-pref', mode);
+      root.setAttribute('data-theme', resolvedFromMode(mode));
+      if (persist) localStorage.setItem('theme', mode);
+      themeButtons.forEach(function (btn) {
+        var active = btn.getAttribute('data-mode') === mode;
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        if (active) moveIndicator(btn);
+      });
+    }
+
+    themeButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        applyMode(btn.getAttribute('data-mode'), true);
+      });
+    });
+
+    mql.addEventListener('change', function () {
+      if (root.getAttribute('data-theme-pref') === 'system') applyMode('system', false);
+    });
+
+    window.addEventListener('resize', function () {
+      var current = themeButtons.filter(function (b) { return b.getAttribute('aria-pressed') === 'true'; })[0];
+      if (current) moveIndicator(current);
+    });
+
+    var initialMode = root.getAttribute('data-theme-pref') || 'system';
+    window.requestAnimationFrame(function () { applyMode(initialMode, false); });
+  })();
+  </script>
+  <script type="module">
+    import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+
+    const SIZE = 512;
+    const MAX_INPUT = 1024;
+    // Eye centers land here in the aligned frame.
+    const EYE_L = { x: SIZE * 0.37, y: SIZE * 0.42 };
+    const EYE_R = { x: SIZE * 0.63, y: SIZE * 0.42 };
+    // MediaPipe face mesh indices.
+    const L_EYE = [33, 133];
+    const R_EYE = [362, 263];
+    const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377,
+      152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
+
+    const $ = (id) => document.getElementById(id);
+    const modelStatus = $('modelStatus');
+    const resultBox = $('resultBox');
+    const out = $('result');
+    const outCtx = out.getContext('2d');
+    const blendEl = $('blend'), shapeEl = $('shape'), linkEl = $('linkShape');
+    const meshEl = $('showMesh'), cropEl = $('crop');
+    const swapBtn = $('swapBtn'), downloadBtn = $('downloadBtn');
+
+    // Per-slot state: { aligned: canvas, pts: [{x,y}] in aligned coords }
+    let faces = [null, null];
+    let triangles = null;
+    let landmarker = null;
+    const modelReady = initModel();
+
+    async function initModel() {
+      try {
+        const fileset = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+        const opts = (delegate) => ({
+          baseOptions: {
+            modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+            delegate,
+          },
+          runningMode: 'IMAGE',
+          numFaces: 4,
+        });
+        try {
+          landmarker = await FaceLandmarker.createFromOptions(fileset, opts('GPU'));
+        } catch (e) {
+          landmarker = await FaceLandmarker.createFromOptions(fileset, opts('CPU'));
+        }
+        modelStatus.textContent = 'model ready';
+        modelStatus.className = 'model-status ok';
+      } catch (err) {
+        console.error(err);
+        modelStatus.textContent = 'could not load face model — check your connection';
+        modelStatus.className = 'model-status err';
+        throw err;
+      }
+    }
+
+    // ---------- image intake ----------
+
+    let heicLoader = null;
+    function loadHeic2any() {
+      if (window.heic2any) return Promise.resolve();
+      if (!heicLoader) {
+        heicLoader = new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+          s.onload = resolve;
+          s.onerror = () => reject(new Error('could not load HEIC converter'));
+          document.head.appendChild(s);
+        });
+      }
+      return heicLoader;
+    }
+
+    async function blobToCanvas(blob) {
+      const isHeic = /heic|heif/i.test(blob.type) || /\.(heic|heif)$/i.test(blob.name || '');
+      let bitmap;
+      try {
+        bitmap = await createImageBitmap(blob);
+      } catch (e) {
+        if (!isHeic) throw new Error("couldn't read that image");
+        await loadHeic2any();
+        const converted = await window.heic2any({ blob, toType: 'image/jpeg', quality: 0.92 });
+        bitmap = await createImageBitmap(Array.isArray(converted) ? converted[0] : converted);
+      }
+      const scale = Math.min(1, MAX_INPUT / Math.max(bitmap.width, bitmap.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(bitmap.width * scale);
+      c.height = Math.round(bitmap.height * scale);
+      c.getContext('2d').drawImage(bitmap, 0, 0, c.width, c.height);
+      bitmap.close && bitmap.close();
+      return c;
+    }
+
+    function setStatus(i, text, isErr) {
+      const el = $('status' + i);
+      el.textContent = text;
+      el.className = 'slot-status' + (isErr ? ' err' : '');
+    }
+
+    async function handleBlob(i, blob) {
+      setStatus(i, 'reading…');
+      try {
+        const src = await blobToCanvas(blob);
+        setStatus(i, 'finding face…');
+        await modelReady;
+        const result = landmarker.detect(src);
+        const all = result.faceLandmarks || [];
+        if (!all.length) {
+          faces[i] = null;
+          clearThumb(i);
+          setStatus(i, 'no face found — try a clearer, front-facing photo', true);
+          update();
+          return;
+        }
+        // Largest face wins.
+        let best = all[0], bestArea = -1;
+        for (const lm of all) {
+          let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+          for (const p of lm) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+          const area = (x1 - x0) * (y1 - y0);
+          if (area > bestArea) { bestArea = area; best = lm; }
+        }
+        const raw = best.map((p) => ({ x: p.x * src.width, y: p.y * src.height }));
+        faces[i] = alignFace(src, raw);
+        drawThumb(i);
+        setStatus(i, all.length > 1 ? `${all.length} faces found — using the largest` : 'face found');
+        triangles = null;
+        update();
+      } catch (err) {
+        console.error(err);
+        faces[i] = null;
+        clearThumb(i);
+        setStatus(i, err.message || 'something went wrong', true);
+        update();
+      }
+    }
+
+    // ---------- alignment ----------
+
+    const mid = (pts, [a, b]) => ({ x: (pts[a].x + pts[b].x) / 2, y: (pts[a].y + pts[b].y) / 2 });
+
+    function alignFace(src, raw) {
+      const p = mid(raw, L_EYE), q = mid(raw, R_EYE);
+      const dx = q.x - p.x, dy = q.y - p.y;
+      const Dx = EYE_R.x - EYE_L.x, Dy = EYE_R.y - EYE_L.y;
+      const s = Math.hypot(Dx, Dy) / Math.hypot(dx, dy);
+      const ang = Math.atan2(Dy, Dx) - Math.atan2(dy, dx);
+      const a = s * Math.cos(ang), b = s * Math.sin(ang);
+      const tx = EYE_L.x - (a * p.x - b * p.y);
+      const ty = EYE_L.y - (b * p.x + a * p.y);
+
+      const aligned = document.createElement('canvas');
+      aligned.width = aligned.height = SIZE;
+      const ctx = aligned.getContext('2d');
+      // Fill with a blurred, stretched copy first so empty corners aren't black.
+      ctx.filter = 'blur(24px)';
+      ctx.drawImage(src, 0, 0, SIZE, SIZE);
+      ctx.filter = 'none';
+      ctx.setTransform(a, b, -b, a, tx, ty);
+      ctx.drawImage(src, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+      const pts = raw.map((r) => ({ x: a * r.x - b * r.y + tx, y: b * r.x + a * r.y + ty }));
+      // Fixed frame points so the whole square is triangulated.
+      const e = SIZE - 1, h = SIZE / 2, k = SIZE / 4;
+      for (const [x, y] of [[0, 0], [k, 0], [h, 0], [e - k, 0], [e, 0], [e, k], [e, h], [e, e - k], [e, e],
+        [e - k, e], [h, e], [k, e], [0, e], [0, e - k], [0, h], [0, k]]) pts.push({ x, y });
+      return { aligned, pts };
+    }
+
+    // ---------- thumbnails ----------
+
+    function drawThumb(i) {
+      const drop = $('drop' + i);
+      const c = drop.querySelector('canvas');
+      const ctx = c.getContext('2d');
+      const f = faces[i];
+      ctx.drawImage(f.aligned, 0, 0, c.width, c.height);
+      ctx.fillStyle = 'rgba(127, 203, 156, 0.85)';
+      for (let j = 0; j < 478; j++) {
+        ctx.beginPath();
+        ctx.arc(f.pts[j].x, f.pts[j].y, 1.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      drop.classList.add('has-img');
+    }
+
+    function clearThumb(i) {
+      $('drop' + i).classList.remove('has-img');
+    }
+
+    // ---------- warp + blend ----------
+
+    const bufA = document.createElement('canvas');
+    const bufB = document.createElement('canvas');
+    bufA.width = bufA.height = bufB.width = bufB.height = SIZE;
+
+    function warpInto(dstCanvas, srcCanvas, srcPts, dstPts, tris) {
+      const ctx = dstCanvas.getContext('2d');
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, SIZE, SIZE);
+      for (let t = 0; t < tris.length; t += 3) {
+        const i0 = tris[t], i1 = tris[t + 1], i2 = tris[t + 2];
+        const s0 = srcPts[i0], s1 = srcPts[i1], s2 = srcPts[i2];
+        const d0 = dstPts[i0], d1 = dstPts[i1], d2 = dstPts[i2];
+        const ux = s1.x - s0.x, uy = s1.y - s0.y, vx = s2.x - s0.x, vy = s2.y - s0.y;
+        const det = ux * vy - vx * uy;
+        if (Math.abs(det) < 1e-6) continue;
+        const Ux = d1.x - d0.x, Uy = d1.y - d0.y, Vx = d2.x - d0.x, Vy = d2.y - d0.y;
+        const a = (Ux * vy - Vx * uy) / det;
+        const c = (Vx * ux - Ux * vx) / det;
+        const b = (Uy * vy - Vy * uy) / det;
+        const d = (Vy * ux - Uy * vx) / det;
+        const e = d0.x - a * s0.x - c * s0.y;
+        const f = d0.y - b * s0.x - d * s0.y;
+
+        // Clip to the destination triangle, nudged outward to hide hairline seams.
+        const cx = (d0.x + d1.x + d2.x) / 3, cy = (d0.y + d1.y + d2.y) / 3;
+        const grow = (p) => {
+          const gx = p.x - cx, gy = p.y - cy, len = Math.hypot(gx, gy) || 1;
+          return [p.x + (gx / len) * 0.7, p.y + (gy / len) * 0.7];
+        };
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.beginPath();
+        ctx.moveTo(...grow(d0));
+        ctx.lineTo(...grow(d1));
+        ctx.lineTo(...grow(d2));
+        ctx.closePath();
+        ctx.clip();
+        ctx.setTransform(a, b, c, d, e, f);
+        ctx.drawImage(srcCanvas, 0, 0);
+        ctx.restore();
+      }
+    }
+
+    const lerpPts = (A, B, t) => A.map((p, i) => ({ x: p.x + (B[i].x - p.x) * t, y: p.y + (B[i].y - p.y) * t }));
+
+    function render() {
+      const [A, B] = faces;
+      if (!A || !B) return;
+      const t = blendEl.value / 100;
+      const st = (linkEl.checked ? blendEl.value : shapeEl.value) / 100;
+
+      if (!triangles) {
+        // Triangulate the halfway shape once; the topology is reused for every slider position.
+        const midPts = lerpPts(A.pts, B.pts, 0.5);
+        triangles = new Delaunator(midPts.flatMap((p) => [p.x, p.y])).triangles;
+      }
+      const target = lerpPts(A.pts, B.pts, st);
+      warpInto(bufA, A.aligned, A.pts, target, triangles);
+      warpInto(bufB, B.aligned, B.pts, target, triangles);
+
+      outCtx.setTransform(1, 0, 0, 1, 0, 0);
+      outCtx.globalCompositeOperation = 'source-over';
+      outCtx.globalAlpha = 1;
+      outCtx.clearRect(0, 0, SIZE, SIZE);
+      outCtx.drawImage(bufA, 0, 0);
+      outCtx.globalAlpha = t;
+      outCtx.drawImage(bufB, 0, 0);
+      outCtx.globalAlpha = 1;
+
+      if (cropEl.checked) featherFace(target);
+      if (meshEl.checked) drawMesh(target);
+    }
+
+    function featherFace(pts) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const i of FACE_OVAL) {
+        x0 = Math.min(x0, pts[i].x); y0 = Math.min(y0, pts[i].y);
+        x1 = Math.max(x1, pts[i].x); y1 = Math.max(y1, pts[i].y);
+      }
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2 - (y1 - y0) * 0.06;
+      const rx = (x1 - x0) / 2 * 1.12, ry = (y1 - y0) / 2 * 1.2;
+      outCtx.save();
+      outCtx.globalCompositeOperation = 'destination-in';
+      outCtx.translate(cx, cy);
+      outCtx.scale(rx / ry, 1);
+      const g = outCtx.createRadialGradient(0, 0, ry * 0.82, 0, 0, ry * 1.12);
+      g.addColorStop(0, 'rgba(0,0,0,1)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      outCtx.fillStyle = g;
+      outCtx.fillRect(-SIZE * 2, -SIZE * 2, SIZE * 4, SIZE * 4);
+      outCtx.restore();
+    }
+
+    function drawMesh(pts) {
+      outCtx.save();
+      outCtx.strokeStyle = 'rgba(127, 203, 156, 0.75)';
+      outCtx.lineWidth = 0.9;
+      outCtx.beginPath();
+      for (let t = 0; t < triangles.length; t += 3) {
+        const a = pts[triangles[t]], b = pts[triangles[t + 1]], c = pts[triangles[t + 2]];
+        outCtx.moveTo(a.x, a.y);
+        outCtx.lineTo(b.x, b.y);
+        outCtx.lineTo(c.x, c.y);
+        outCtx.closePath();
+      }
+      outCtx.stroke();
+      outCtx.restore();
+    }
+
+    let pending = false;
+    function update() {
+      $('blendOut').textContent = blendEl.value + '%';
+      if (linkEl.checked) shapeEl.value = blendEl.value;
+      shapeEl.disabled = linkEl.checked;
+      $('shapeOut').textContent = shapeEl.value + '%';
+
+      const ready = !!(faces[0] && faces[1]);
+      resultBox.classList.toggle('ready', ready);
+      swapBtn.disabled = !(faces[0] || faces[1]);
+      downloadBtn.disabled = !ready;
+      if (!ready || pending) return;
+      pending = true;
+      requestAnimationFrame(() => { pending = false; render(); });
+    }
+
+    // ---------- wiring ----------
+
+    [0, 1].forEach((i) => {
+      const drop = $('drop' + i);
+      const input = drop.querySelector('input');
+      input.addEventListener('change', () => { if (input.files[0]) handleBlob(i, input.files[0]); input.value = ''; });
+      drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+      drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+      drop.addEventListener('drop', (e) => {
+        e.preventDefault();
+        drop.classList.remove('over');
+        const file = e.dataTransfer.files[0];
+        if (file) handleBlob(i, file);
+      });
+    });
+
+    // Paste fills the first empty slot (or A).
+    window.addEventListener('paste', (e) => {
+      const item = [...(e.clipboardData?.items || [])].find((it) => it.type.startsWith('image/'));
+      if (!item) return;
+      handleBlob(faces[0] ? (faces[1] ? 0 : 1) : 0, item.getAsFile());
+    });
+
+    [blendEl, shapeEl, linkEl, meshEl, cropEl].forEach((el) => el.addEventListener('input', update));
+
+    swapBtn.addEventListener('click', () => {
+      faces = [faces[1], faces[0]];
+      const s0 = $('status0').textContent, s1 = $('status1').textContent;
+      [0, 1].forEach((i) => (faces[i] ? drawThumb(i) : clearThumb(i)));
+      setStatus(0, s1); setStatus(1, s0);
+      update();
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      out.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `face-merge-${blendEl.value}.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }, 'image/png');
+    });
+
+    // Debug/testing: ?a=path&b=path loads same-origin images.
+    const params = new URLSearchParams(location.search);
+    ['a', 'b'].forEach(async (key, i) => {
+      const v = params.get(key);
+      if (!v) return;
+      const url = new URL(v, location.href);
+      if (url.origin !== location.origin) return;
+      try {
+        const res = await fetch(url);
+        handleBlob(i, await res.blob());
+      } catch (e) { setStatus(i, "couldn't load test image", true); }
+    });
+    if (params.get('t')) { blendEl.value = params.get('t'); }
+    if (params.get('mesh')) { meshEl.checked = true; }
+
+    update();
+  </script>
+</body>
+</html>
