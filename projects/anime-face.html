@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Anime Face — Samarth</title>
+<meta name="description" content="Upload a photo and redraw the face in a cel-shaded anime style — landmarks, warping, line art and drawn eyes, all in your browser." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..700,0..100,0..1&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css" />
+<script>
+  (function () {
+    var stored = localStorage.getItem('theme');
+    var mode = stored || 'system';
+    var resolved = mode === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : mode;
+    document.documentElement.setAttribute('data-theme', resolved);
+    document.documentElement.setAttribute('data-theme-pref', mode);
+  })();
+</script>
+<script src="../display-settings.js"></script>
+<style>
+  body { min-height: 100vh; }
+
+  .af-page {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: clamp(32px, 6vh, 72px) clamp(20px, 6vw, 64px) 80px;
+  }
+  .af-title {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-variation-settings: "opsz" 40;
+    font-size: clamp(1.9rem, 5vw, 2.5rem);
+    margin: 22px 0 6px;
+  }
+  .af-sub { font-size: 0.98rem; line-height: 1.55; color: var(--text-muted); margin: 0 0 10px; max-width: 62ch; }
+  .af-privacy { font-family: var(--font-mono); font-size: 0.74rem; color: var(--accent); margin: 0 0 30px; line-height: 1.6; }
+
+  .af-panel {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-elevated);
+    padding: clamp(18px, 4vw, 30px);
+    margin-bottom: 24px;
+  }
+  .panel-title {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 16px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .model-status { text-transform: lowercase; letter-spacing: 0.02em; }
+  .model-status.ok { color: var(--accent); }
+  .model-status.err, .photo-status.err { color: #c96a4a; }
+
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .pair-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .pair-label { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
+
+  .box {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .box canvas { width: 100%; height: 100%; display: none; }
+  .box.ready canvas { display: block; }
+  .box.ready .box-hint { display: none; }
+  .drop { border-style: dashed; cursor: pointer; transition: border-color 0.15s ease; }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop input { display: none; }
+  .box-hint {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.7;
+    padding: 12px;
+  }
+  .box-hint b { color: var(--text); font-weight: 500; font-size: 1.4rem; display: block; font-family: var(--font-display); }
+  .photo-status { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); min-height: 1.2em; }
+
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 18px 24px;
+    margin-top: 22px;
+  }
+  .control {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: lowercase;
+    color: var(--text-muted);
+  }
+  .control-row { display: flex; justify-content: space-between; }
+  .control-row output { color: var(--text); }
+  .control input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .control select {
+    font-family: var(--font-mono); font-size: 0.76rem; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+  }
+  .check {
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); cursor: pointer;
+  }
+  .check input { accent-color: var(--accent); }
+  .checks { display: flex; flex-direction: column; gap: 10px; justify-content: center; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .af-btn {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .af-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .af-btn:disabled { opacity: 0.4; cursor: default; }
+
+  .how-step { margin: 0 0 16px; }
+  .how-step:last-child { margin-bottom: 0; }
+  .how-name { font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent); margin: 0 0 4px; }
+  .how-desc { font-size: 0.92rem; line-height: 1.6; color: var(--text-muted); margin: 0; }
+
+  @media (max-width: 640px) {
+    .pair { grid-template-columns: 1fr; }
+    .controls { grid-template-columns: 1fr 1fr; gap: 16px; }
+  }
+</style>
+</head>
+<body>
+
+  <header class="topbar">
+    <nav class="nav" aria-label="Primary">
+      <a href="../index.html#home" class="nav-link">Home</a>
+      <a href="../index.html#about" class="nav-link">About</a>
+      <a href="../index.html#projects" class="nav-link active">Projects</a>
+    </nav>
+
+    <div class="theme-toggle" role="group" aria-label="Theme">
+      <button class="theme-btn" data-mode="light" aria-label="Light mode" title="Light">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="12" y1="1.5" x2="12" y2="4.5"/><line x1="12" y1="19.5" x2="12" y2="22.5"/><line x1="1.5" y1="12" x2="4.5" y2="12"/><line x1="19.5" y1="12" x2="22.5" y2="12"/><line x1="4.4" y1="4.4" x2="6.5" y2="6.5"/><line x1="17.5" y1="17.5" x2="19.6" y2="19.6"/><line x1="4.4" y1="19.6" x2="6.5" y2="17.5"/><line x1="17.5" y1="6.5" x2="19.6" y2="4.4"/></g></svg>
+      </button>
+      <button class="theme-btn" data-mode="dark" aria-label="Dark mode" title="Dark">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" transform="translate(1.1,-1.05)" d="M20.7 14.9A8.6 8.6 0 0 1 9.1 3.3a.7.7 0 0 0-.9-.9 9.9 9.9 0 1 0 13.4 13.4.7.7 0 0 0-.9-.9Z"/></svg>
+      </button>
+      <button class="theme-btn" data-mode="system" aria-label="System preference" title="System">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="8" y1="20" x2="16" y2="20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="12" y1="16.5" x2="12" y2="20" stroke="currentColor" stroke-width="1.6"/></svg>
+      </button>
+      <span class="theme-indicator" aria-hidden="true"></span>
+    </div>
+  </header>
+
+  <div class="af-page">
+    <h1 class="af-title">Anime Face</h1>
+    <p class="af-sub">
+      Drop in a photo and see the face redrawn in a cel-shaded anime style: bigger eyes, a smaller nose and chin,
+      flat colors, ink lines and drawn-on eyes. No AI art model. It's 478 face landmarks, some geometry and a few image filters.
+    </p>
+    <p class="af-privacy">
+      everything runs in your browser — photos are never uploaded or stored.<br />
+      works best with a front-facing photo where the face is well lit.
+    </p>
+
+    <div class="af-panel">
+      <p class="panel-title"><span>anime-ify</span><span class="model-status" id="modelStatus">loading face model…</span></p>
+      <div class="pair">
+        <div class="pair-col">
+          <label class="box drop" id="drop">
+            <input type="file" accept="image/*,.heic,.heif" id="fileInput" />
+            <canvas id="original" width="512" height="512"></canvas>
+            <span class="box-hint"><b>+</b>add a photo<br />click, drop or paste</span>
+          </label>
+          <span class="photo-status" id="photoStatus">original</span>
+        </div>
+        <div class="pair-col">
+          <div class="box" id="resultBox">
+            <canvas id="result" width="512" height="512"></canvas>
+            <span class="box-hint">your anime face shows up here</span>
+          </div>
+          <span class="pair-label">anime</span>
+        </div>
+      </div>
+
+      <div class="controls">
+        <label class="control">
+          <span class="control-row">proportions <output id="propOut">70</output></span>
+          <input type="range" id="prop" min="0" max="100" value="70" />
+        </label>
+        <label class="control">
+          <span class="control-row">eye size <output id="eyeOut">60</output></span>
+          <input type="range" id="eye" min="0" max="100" value="60" />
+        </label>
+        <label class="control">
+          <span class="control-row">line weight <output id="lineOut">50</output></span>
+          <input type="range" id="line" min="0" max="100" value="50" />
+        </label>
+        <label class="control">
+          <span class="control-row">color bands <output id="bandsOut">3</output></span>
+          <input type="range" id="bands" min="2" max="6" value="3" />
+        </label>
+        <label class="control">
+          eye color
+          <select id="eyeColor">
+            <option value="auto">auto (from photo)</option>
+            <option value="#7a4a2a">brown</option>
+            <option value="#2f7fd8">blue</option>
+            <option value="#2f9e6a">green</option>
+            <option value="#8a5ad6">violet</option>
+            <option value="#d0393f">red</option>
+            <option value="#d89a1e">gold</option>
+          </select>
+        </label>
+        <label class="control">
+          background
+          <select id="bg">
+            <option value="sky">sky</option>
+            <option value="sunset">sunset</option>
+            <option value="dreamy">dreamy</option>
+            <option value="plain">plain</option>
+            <option value="original">original</option>
+          </select>
+        </label>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="drawEyes" checked /> anime eyes</label>
+          <label class="check"><input type="checkbox" id="blush" checked /> blush</label>
+        </div>
+        <div class="btn-row">
+          <button class="af-btn" id="downloadBtn" disabled>download png</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="af-panel">
+      <p class="panel-title"><span>how it works</span></p>
+      <div class="how-step">
+        <p class="how-name">1. landmarks + background</p>
+        <p class="how-desc">MediaPipe's face landmarker finds 478 points on the face. The photo is lined up so the eyes sit in fixed spots. A second small model separates you from the background so it can be swapped for a drawn sky.</p>
+      </div>
+      <div class="how-step">
+        <p class="how-name">2. anime proportions</p>
+        <p class="how-desc">The points are pushed toward anime proportions: eyes grow (taller more than wider), the nose and mouth shrink, the lower face shortens, and the jaw narrows more toward the chin into a V. The photo is split into about a thousand triangles and each one is warped onto the new shape.</p>
+      </div>
+      <div class="how-step">
+        <p class="how-name">3. cel shading</p>
+        <p class="how-desc">An edge-preserving blur flattens skin and hair without smudging edges. Brightness is then snapped into a few flat bands (<em>color bands</em>), lifted and made more saturated.</p>
+      </div>
+      <div class="how-step">
+        <p class="how-name">4. ink lines</p>
+        <p class="how-desc">A difference-of-Gaussians edge detector (XDoG) finds outlines and draws them in dark ink. Flat areas stay clean.</p>
+      </div>
+      <div class="how-step">
+        <p class="how-name">5. drawn eyes + blush</p>
+        <p class="how-desc">Each eye opening is traced from the eyelid landmarks. A big iris is painted inside it: a gradient, a pupil, a lid shadow and two highlights, colored from your real iris. Then a thick lash line with a flick, a crease and blush strokes.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    var root = document.documentElement;
+    var mql = window.matchMedia('(prefers-color-scheme: dark)');
+    var themeButtons = Array.prototype.slice.call(document.querySelectorAll('.theme-btn'));
+    var indicator = document.querySelector('.theme-indicator');
+
+    function resolvedFromMode(mode) {
+      return mode === 'system' ? (mql.matches ? 'dark' : 'light') : mode;
+    }
+
+    function moveIndicator(btn) {
+      if (!indicator) return;
+      indicator.style.transform = 'translateX(' + btn.offsetLeft + 'px)';
+    }
+
+    function applyMode(mode, persist) {
+      root.setAttribute('data-theme-pref', mode);
+      root.setAttribute('data-theme', resolvedFromMode(mode));
+      if (persist) localStorage.setItem('theme', mode);
+      themeButtons.forEach(function (btn) {
+        var active = btn.getAttribute('data-mode') === mode;
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        if (active) moveIndicator(btn);
+      });
+    }
+
+    themeButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        applyMode(btn.getAttribute('data-mode'), true);
+      });
+    });
+
+    mql.addEventListener('change', function () {
+      if (root.getAttribute('data-theme-pref') === 'system') applyMode('system', false);
+    });
+
+    window.addEventListener('resize', function () {
+      var current = themeButtons.filter(function (b) { return b.getAttribute('aria-pressed') === 'true'; })[0];
+      if (current) moveIndicator(current);
+    });
+
+    var initialMode = root.getAttribute('data-theme-pref') || 'system';
+    window.requestAnimationFrame(function () { applyMode(initialMode, false); });
+  })();
+  </script>
+  <script type="module">
+    import { FaceLandmarker, ImageSegmenter, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+
+    const SIZE = 512;
+    const PREVIEW = 256;
+    const MAX_INPUT = 1024;
+    // Eyes land here in the aligned frame; a little wider framing than Face Merge to keep the hair.
+    const EYE_L = { x: SIZE * 0.4, y: SIZE * 0.45 };
+    const EYE_R = { x: SIZE * 0.6, y: SIZE * 0.45 };
+    const L_EYE = [33, 133];
+    const R_EYE = [362, 263];
+    const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377,
+      152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
+    // Eyelid contours, outer corner first.
+    const EYES = [
+      { upper: [33, 246, 161, 160, 159, 158, 157, 173, 133], lower: [33, 7, 163, 144, 145, 153, 154, 155, 133], top: 159, bottom: 145, dir: -1 },
+      { upper: [263, 466, 388, 387, 386, 385, 384, 398, 362], lower: [263, 249, 390, 373, 374, 380, 381, 382, 362], top: 386, bottom: 374, dir: 1 },
+    ];
+    const IRIS = [468, 473];
+
+    const $ = (id) => document.getElementById(id);
+    const modelStatus = $('modelStatus'), photoStatus = $('photoStatus');
+    const drop = $('drop'), fileInput = $('fileInput');
+    const origCanvas = $('original'), resultBox = $('resultBox');
+    const out = $('result');
+    const outCtx = out.getContext('2d', { willReadFrequently: true });
+    const propEl = $('prop'), eyeEl = $('eye'), lineEl = $('line'), bandsEl = $('bands');
+    const eyeColorEl = $('eyeColor'), bgEl = $('bg'), drawEyesEl = $('drawEyes'), blushEl = $('blush');
+    const downloadBtn = $('downloadBtn');
+
+    let landmarker = null, segmenter = null;
+    // face: { aligned, mask, pts, irisColor, tris }
+    let face = null;
+
+    const modelReady = initModels();
+
+    async function initModels() {
+      try {
+        const fileset = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+        const make = async (Cls, url, extra) => {
+          const opts = (delegate) => ({ baseOptions: { modelAssetPath: url, delegate }, runningMode: 'IMAGE', ...extra });
+          try { return await Cls.createFromOptions(fileset, opts('GPU')); }
+          catch (e) { return await Cls.createFromOptions(fileset, opts('CPU')); }
+        };
+        const segP = make(ImageSegmenter,
+          'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+          { outputConfidenceMasks: true, outputCategoryMask: false })
+          .then((s) => { segmenter = s; })
+          .catch((e) => {
+            console.warn('segmenter unavailable', e);
+            [...bgEl.options].forEach((o) => { if (o.value !== 'original') o.disabled = true; });
+            bgEl.value = 'original';
+          });
+        landmarker = await make(FaceLandmarker,
+          'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+          { numFaces: 4 });
+        await segP;
+        modelStatus.textContent = 'model ready';
+        modelStatus.className = 'model-status ok';
+      } catch (err) {
+        console.error(err);
+        modelStatus.textContent = 'could not load face model — check your connection';
+        modelStatus.className = 'model-status err';
+        throw err;
+      }
+    }
+
+    // ---------- image intake ----------
+
+    let heicLoader = null;
+    function loadHeic2any() {
+      if (window.heic2any) return Promise.resolve();
+      if (!heicLoader) {
+        heicLoader = new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+          s.onload = resolve;
+          s.onerror = () => reject(new Error('could not load HEIC converter'));
+          document.head.appendChild(s);
+        });
+      }
+      return heicLoader;
+    }
+
+    async function blobToCanvas(blob) {
+      const isHeic = /heic|heif/i.test(blob.type) || /\.(heic|heif)$/i.test(blob.name || '');
+      let bitmap;
+      try {
+        bitmap = await createImageBitmap(blob);
+      } catch (e) {
+        if (!isHeic) throw new Error("couldn't read that image");
+        await loadHeic2any();
+        const converted = await window.heic2any({ blob, toType: 'image/jpeg', quality: 0.92 });
+        bitmap = await createImageBitmap(Array.isArray(converted) ? converted[0] : converted);
+      }
+      const scale = Math.min(1, MAX_INPUT / Math.max(bitmap.width, bitmap.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(bitmap.width * scale);
+      c.height = Math.round(bitmap.height * scale);
+      c.getContext('2d').drawImage(bitmap, 0, 0, c.width, c.height);
+      bitmap.close && bitmap.close();
+      return c;
+    }
+
+    function setStatus(text, isErr) {
+      photoStatus.textContent = text;
+      photoStatus.className = 'photo-status' + (isErr ? ' err' : '');
+    }
+
+    let loadToken = 0;
+    async function loadBlob(blob) {
+      const token = ++loadToken;
+      try {
+        setStatus('reading…');
+        const src = await blobToCanvas(blob);
+        drop.classList.add('ready');
+        origCanvas.getContext('2d').drawImage(src, 0, 0, SIZE, SIZE);
+        setStatus('finding face…');
+        await modelReady;
+        if (token !== loadToken) return;
+        const all = landmarker.detect(src).faceLandmarks || [];
+        if (!all.length) {
+          face = null;
+          resultBox.classList.remove('ready');
+          downloadBtn.disabled = true;
+          setStatus('no face found — try a clearer, front-facing photo', true);
+          return;
+        }
+        let best = all[0], bestArea = -1;
+        for (const lm of all) {
+          let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+          for (const p of lm) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+          const area = (x1 - x0) * (y1 - y0);
+          if (area > bestArea) { bestArea = area; best = lm; }
+        }
+        const raw = best.map((p) => ({ x: p.x * src.width, y: p.y * src.height }));
+        face = alignFace(src, raw);
+        origCanvas.getContext('2d').drawImage(face.aligned, 0, 0);
+        const notes = ['original', ...(all.length > 1 ? [`${all.length} faces — using the largest`] : []), ...face.warnings];
+        setStatus(notes.join(' · '));
+        resultBox.classList.add('ready');
+        downloadBtn.disabled = false;
+        render(SIZE);
+      } catch (err) {
+        console.error(err);
+        setStatus(err.message || 'something went wrong', true);
+      }
+    }
+
+    // ---------- alignment ----------
+
+    const mid = (pts, [a, b]) => ({ x: (pts[a].x + pts[b].x) / 2, y: (pts[a].y + pts[b].y) / 2 });
+    const avgPt = (pts, ids) => {
+      let x = 0, y = 0;
+      for (const i of ids) { x += pts[i].x; y += pts[i].y; }
+      return { x: x / ids.length, y: y / ids.length };
+    };
+
+    function alignFace(src, raw) {
+      const p = mid(raw, L_EYE), q = mid(raw, R_EYE);
+      const dx = q.x - p.x, dy = q.y - p.y;
+      const Dx = EYE_R.x - EYE_L.x, Dy = EYE_R.y - EYE_L.y;
+      const s = Math.hypot(Dx, Dy) / Math.hypot(dx, dy);
+      const ang = Math.atan2(Dy, Dx) - Math.atan2(dy, dx);
+      const a = s * Math.cos(ang), b = s * Math.sin(ang);
+      const tx = EYE_L.x - (a * p.x - b * p.y);
+      const ty = EYE_L.y - (b * p.x + a * p.y);
+
+      const aligned = document.createElement('canvas');
+      aligned.width = aligned.height = SIZE;
+      const ctx = aligned.getContext('2d', { willReadFrequently: true });
+      ctx.filter = 'blur(24px)';
+      ctx.drawImage(src, 0, 0, SIZE, SIZE);
+      ctx.filter = 'none';
+      ctx.setTransform(a, b, -b, a, tx, ty);
+      ctx.drawImage(src, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+      const pts = raw.map((r) => ({ x: a * r.x - b * r.y + tx, y: b * r.x + a * r.y + ty }));
+      const e = SIZE - 1, h = SIZE / 2, k = SIZE / 4;
+      for (const [x, y] of [[0, 0], [k, 0], [h, 0], [e - k, 0], [e, 0], [e, k], [e, h], [e, e - k], [e, e],
+        [e - k, e], [h, e], [k, e], [0, e], [0, e - k], [0, h], [0, k]]) pts.push({ x, y });
+      const oc = avgPt(pts, FACE_OVAL);
+      const clamp = (v) => Math.min(SIZE - 3, Math.max(2, v));
+      for (const i of FACE_OVAL) {
+        pts.push({ x: clamp(oc.x + (pts[i].x - oc.x) * 1.35), y: clamp(oc.y + (pts[i].y - oc.y) * 1.35) });
+      }
+
+      const d = EYE_R.x - EYE_L.x;
+      const warnings = [];
+      const yaw = Math.abs(pts[1].x - (EYE_L.x + EYE_R.x) / 2) / d;
+      if (yaw > 0.22) warnings.push('head turned — eyes may look off');
+      if (Math.hypot(dx, dy) < 45) warnings.push('small face — try a closer photo');
+
+      const tris = new Delaunator(pts.flatMap((v) => [v.x, v.y])).triangles;
+      return { aligned, pts, tris, warnings, mask: personMask(aligned, pts), irisColor: sampleIris(aligned, pts) };
+    }
+
+    // Person mask (white, alpha = confidence) on the aligned frame, or null without the segmenter.
+    function personMask(aligned, pts) {
+      if (!segmenter) return null;
+      try {
+        const res = segmenter.segment(aligned);
+        const masks = res.confidenceMasks || [];
+        if (!masks.length) return null;
+        // Pick the channel that is high at the face center (person), whichever index the model uses.
+        const c = avgPt(pts, [1, 6, 168]);
+        const at = Math.round(c.y) * SIZE + Math.round(c.x);
+        let data = null;
+        for (const m of masks) {
+          const arr = m.getAsFloat32Array();
+          if (!data || arr[at] > data[at]) data = arr;
+        }
+        const flip = data[at] < 0.5;
+        const m = document.createElement('canvas');
+        m.width = m.height = SIZE;
+        const mctx = m.getContext('2d');
+        const img = mctx.createImageData(SIZE, SIZE);
+        for (let i = 0; i < data.length; i++) {
+          const v = flip ? 1 - data[i] : data[i];
+          img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = 255;
+          img.data[i * 4 + 3] = Math.round(Math.min(1, Math.max(0, (v - 0.25) / 0.5)) * 255);
+        }
+        mctx.putImageData(img, 0, 0);
+        masks.forEach((mm) => mm.close && mm.close());
+        return m;
+      } catch (e) {
+        console.warn('segmentation failed', e);
+        return null;
+      }
+    }
+
+    // Average iris color, skipping the dark pupil and bright glare, pushed to anime saturation.
+    function sampleIris(aligned, pts) {
+      const ctx = aligned.getContext('2d', { willReadFrequently: true });
+      let r = 0, g = 0, b = 0, n = 0;
+      for (const ci of IRIS) {
+        const c = pts[ci];
+        const rad = Math.max(2, Math.hypot(pts[ci + 1].x - pts[ci + 3].x, pts[ci + 1].y - pts[ci + 3].y) / 2);
+        const x0 = Math.round(c.x - rad), y0 = Math.round(c.y - rad), w = Math.round(rad * 2) + 1;
+        const d = ctx.getImageData(x0, y0, w, w).data;
+        for (let y = 0; y < w; y++) {
+          for (let x = 0; x < w; x++) {
+            const dist = Math.hypot(x - rad, y - rad) / rad;
+            if (dist < 0.4 || dist > 0.9) continue;
+            const j = (y * w + x) * 4;
+            const l = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+            if (l < 25 || l > 200) continue;
+            r += d[j]; g += d[j + 1]; b += d[j + 2]; n++;
+          }
+        }
+      }
+      if (!n) return '#7a4a2a';
+      const [hh, ss] = rgbToHsl(r / n, g / n, b / n);
+      return hslToHex(hh, Math.max(0.45, Math.min(0.8, ss * 1.8)), 0.42);
+    }
+
+    function rgbToHsl(r, g, b) {
+      r /= 255; g /= 255; b /= 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2;
+      if (max === min) return [0.08, 0, l];
+      const d = max - min;
+      const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      let h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return [h / 6, s, l];
+    }
+    function hslToHex(h, s, l) {
+      const f = (n) => {
+        const k = (n + h * 12) % 12, a = s * Math.min(l, 1 - l);
+        return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
+      };
+      return '#' + [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, '0')).join('');
+    }
+    function hexToRgb(hex) {
+      const n = parseInt(hex.slice(1), 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+    const mixRgb = (c, t, f) => c.map((v, i) => Math.round(v + (t[i] - v) * f));
+    const rgbStr = (c, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+    // ---------- anime proportions ----------
+
+    function faceAnchors(pts) {
+      const eyeL = mid(pts, L_EYE), eyeR = mid(pts, R_EYE);
+      return {
+        eyeL, eyeR,
+        d: Math.hypot(eyeR.x - eyeL.x, eyeR.y - eyeL.y),
+        cx: (eyeL.x + eyeR.x) / 2,
+        eyeY: (eyeL.y + eyeR.y) / 2,
+        nose: avgPt(pts, [1, 4, 5]),
+        mouth: avgPt(pts, [13, 14]),
+        chinY: pts[152].y,
+        faceW: pts[454].x - pts[234].x,
+      };
+    }
+
+    // prop and eye are 0..1.
+    function animeShape(pts, prop, eye) {
+      const A = faceAnchors(pts);
+      const span = A.chinY - A.eyeY;
+      const fall = (q, c, r) => Math.exp(-((q.x - c.x) ** 2 + (q.y - c.y) ** 2) / (r * r));
+      const ex = 1 + 0.32 * eye, ey = 1 + 0.8 * eye;
+      const nose = 1 - 0.5 * prop, mouth = 1 - 0.3 * prop;
+      return pts.map((q, idx) => {
+        if (idx >= 478) return q;
+        let dx = 0, dy = 0;
+        for (const c of [A.eyeL, A.eyeR]) {
+          const w = fall(q, c, 0.36 * A.d);
+          dx += (q.x - c.x) * (ex - 1) * w;
+          dy += (q.y - c.y) * (ey - 1) * w;
+        }
+        let w = fall(q, A.nose, 0.42 * A.d);
+        dx += (q.x - A.nose.x) * (nose - 1) * w;
+        dy += (q.y - A.nose.y) * (nose - 1) * w;
+        w = fall(q, A.mouth, 0.45 * A.d);
+        dx += (q.x - A.mouth.x) * (mouth - 1) * w;
+        dy += (q.y - A.mouth.y) * (mouth - 1) * w;
+
+        let x = q.x + dx, y = q.y + dy;
+        if (y > A.eyeY) {
+          const t = Math.min(1, (y - A.eyeY) / span);
+          y = A.eyeY + (y - A.eyeY) * (1 - 0.12 * prop);
+          // V chin: narrowing grows fast toward the chin.
+          x = A.cx + (x - A.cx) * (1 - 0.3 * prop * Math.pow(t, 2.2));
+        } else {
+          y = A.eyeY + (y - A.eyeY) * (1 + 0.06 * prop);
+        }
+        return { x, y };
+      });
+    }
+
+    // ---------- warp ----------
+
+    function warpInto(dstCanvas, srcCanvas, srcPts, dstPts, tris, k) {
+      const ctx = dstCanvas.getContext('2d');
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, dstCanvas.width, dstCanvas.height);
+      for (let t = 0; t < tris.length; t += 3) {
+        const i0 = tris[t], i1 = tris[t + 1], i2 = tris[t + 2];
+        const s0 = srcPts[i0], s1 = srcPts[i1], s2 = srcPts[i2];
+        const d0x = dstPts[i0].x * k, d0y = dstPts[i0].y * k;
+        const d1x = dstPts[i1].x * k, d1y = dstPts[i1].y * k;
+        const d2x = dstPts[i2].x * k, d2y = dstPts[i2].y * k;
+        const ux = s1.x - s0.x, uy = s1.y - s0.y, vx = s2.x - s0.x, vy = s2.y - s0.y;
+        const det = ux * vy - vx * uy;
+        if (Math.abs(det) < 1e-6) continue;
+        const Ux = d1x - d0x, Uy = d1y - d0y, Vx = d2x - d0x, Vy = d2y - d0y;
+        const a = (Ux * vy - Vx * uy) / det;
+        const c = (Vx * ux - Ux * vx) / det;
+        const b = (Uy * vy - Vy * uy) / det;
+        const d = (Vy * ux - Uy * vx) / det;
+        const e = d0x - a * s0.x - c * s0.y;
+        const f = d0y - b * s0.x - d * s0.y;
+        const cx = (d0x + d1x + d2x) / 3, cy = (d0y + d1y + d2y) / 3;
+        const grow = (x, y) => {
+          const gx = x - cx, gy = y - cy, len = Math.hypot(gx, gy) || 1;
+          return [x + (gx / len) * 0.7, y + (gy / len) * 0.7];
+        };
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(...grow(d0x, d0y));
+        ctx.lineTo(...grow(d1x, d1y));
+        ctx.lineTo(...grow(d2x, d2y));
+        ctx.closePath();
+        ctx.clip();
+        ctx.setTransform(a, b, c, d, e, f);
+        ctx.drawImage(srcCanvas, 0, 0);
+        ctx.restore();
+      }
+    }
+
+    const bufs = {};
+    function buf(name, size) {
+      if (!bufs[name]) {
+        bufs[name] = document.createElement('canvas');
+        bufs[name].getContext('2d', { willReadFrequently: true });
+      }
+      const c = bufs[name];
+      if (c.width !== size) c.width = c.height = size;
+      return c;
+    }
+
+    // ---------- backgrounds ----------
+
+    // Small seeded random so clouds and bokeh don't jump between renders.
+    function rng(seed) {
+      return () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    }
+
+    function drawBackground(ctx, size, kind) {
+      const S = size;
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      const lin = (stops) => {
+        const g = ctx.createLinearGradient(0, 0, 0, S);
+        stops.forEach(([o, c]) => g.addColorStop(o, c));
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, S, S);
+      };
+      if (kind === 'sky') {
+        lin([[0, '#4f9be8'], [0.6, '#9fd0f7'], [1, '#e4f3fd']]);
+        const r = rng(7);
+        for (let c = 0; c < 5; c++) {
+          const cx = r() * S, cy = S * (0.08 + r() * 0.75), base = S * (0.05 + r() * 0.05);
+          for (let j = 0; j < 6; j++) {
+            const x = cx + (j - 2.5) * base * 0.9, y = cy - Math.sin((j / 5) * Math.PI) * base * 0.7;
+            const rad = base * (0.8 + Math.sin((j / 5) * Math.PI) * 0.6);
+            const g = ctx.createRadialGradient(x, y - rad * 0.3, rad * 0.2, x, y, rad);
+            g.addColorStop(0, 'rgba(255,255,255,0.98)');
+            g.addColorStop(0.85, 'rgba(240,246,255,0.92)');
+            g.addColorStop(1, 'rgba(225,236,252,0)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(x, y, rad, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      } else if (kind === 'sunset') {
+        lin([[0, '#5b4a9e'], [0.45, '#f08a7e'], [0.75, '#ffc68a'], [1, '#ffe6bd']]);
+        const g = ctx.createRadialGradient(S * 0.78, S * 0.7, 0, S * 0.78, S * 0.7, S * 0.3);
+        g.addColorStop(0, 'rgba(255,248,220,1)');
+        g.addColorStop(0.3, 'rgba(255,230,170,0.9)');
+        g.addColorStop(1, 'rgba(255,200,140,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, S, S);
+      } else if (kind === 'dreamy') {
+        lin([[0, '#e9c9f2'], [0.55, '#f8d9e6'], [1, '#fdeedd']]);
+        const r = rng(3);
+        for (let i = 0; i < 26; i++) {
+          const x = r() * S, y = r() * S, rad = S * (0.015 + r() * 0.05);
+          ctx.fillStyle = `rgba(255,255,255,${0.18 + r() * 0.3})`;
+          ctx.beginPath();
+          ctx.arc(x, y, rad, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        lin([[0, '#f4efe4'], [1, '#e7dfcf']]);
+      }
+      ctx.restore();
+    }
+
+    // ---------- cel shading ----------
+
+    // One separable pass of an edge-preserving (bilateral) blur, horizontal or vertical.
+    function bilateralPass(src, dst, size, radius, sigmaR, horiz) {
+      const spatial = [];
+      for (let i = -radius; i <= radius; i++) spatial.push(Math.exp(-(i * i) / (2 * (radius / 2 + 0.5) ** 2)));
+      const rangeLUT = new Float32Array(256 * 3);
+      for (let i = 0; i < rangeLUT.length; i++) rangeLUT[i] = Math.exp(-(i * i) / (2 * sigmaR * sigmaR * 3));
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const o = (y * size + x) * 3;
+          const r0 = src[o], g0 = src[o + 1], b0 = src[o + 2];
+          let sr = 0, sg = 0, sb = 0, sw = 0;
+          for (let i = -radius; i <= radius; i++) {
+            const xx = horiz ? Math.min(size - 1, Math.max(0, x + i)) : x;
+            const yy = horiz ? y : Math.min(size - 1, Math.max(0, y + i));
+            const p = (yy * size + xx) * 3;
+            const diff = Math.abs(src[p] - r0) + Math.abs(src[p + 1] - g0) + Math.abs(src[p + 2] - b0);
+            const w = spatial[i + radius] * rangeLUT[Math.min(767, diff | 0)];
+            sr += src[p] * w; sg += src[p + 1] * w; sb += src[p + 2] * w; sw += w;
+          }
+          dst[o] = sr / sw; dst[o + 1] = sg / sw; dst[o + 2] = sb / sw;
+        }
+      }
+    }
+
+    // Separable Gaussian blur of a single-channel image.
+    function gaussian(src, size, sigma) {
+      const rad = Math.max(1, Math.ceil(sigma * 2.5));
+      const kern = [];
+      let sum = 0;
+      for (let i = -rad; i <= rad; i++) { const v = Math.exp(-(i * i) / (2 * sigma * sigma)); kern.push(v); sum += v; }
+      for (let i = 0; i < kern.length; i++) kern[i] /= sum;
+      const tmp = new Float32Array(src.length), out = new Float32Array(src.length);
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          let s = 0;
+          for (let i = -rad; i <= rad; i++) s += src[y * size + Math.min(size - 1, Math.max(0, x + i))] * kern[i + rad];
+          tmp[y * size + x] = s;
+        }
+      }
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          let s = 0;
+          for (let i = -rad; i <= rad; i++) s += tmp[Math.min(size - 1, Math.max(0, y + i)) * size + x] * kern[i + rad];
+          out[y * size + x] = s;
+        }
+      }
+      return out;
+    }
+
+    // Shade the whole frame; `alpha` (person mask, 0..255 per pixel) keeps drawn backgrounds out of the color pass.
+    function celShade(ctx, size, bands, lineAmt, alpha) {
+      const k = size / SIZE;
+      const img = ctx.getImageData(0, 0, size, size);
+      const d = img.data, n = size * size;
+      let a = new Float32Array(n * 3), b = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { a[i * 3] = d[i * 4]; a[i * 3 + 1] = d[i * 4 + 1]; a[i * 3 + 2] = d[i * 4 + 2]; }
+      const radius = Math.max(2, Math.round(4 * k));
+      for (let it = 0; it < 2; it++) {
+        bilateralPass(a, b, size, radius, 22, true);
+        bilateralPass(b, a, size, radius, 22, false);
+      }
+
+      const L = new Float32Array(n);
+      for (let i = 0; i < n; i++) L[i] = (0.299 * a[i * 3] + 0.587 * a[i * 3 + 1] + 0.114 * a[i * 3 + 2]) / 255;
+
+      // XDoG edges on the flattened luma.
+      let edge = null;
+      if (lineAmt > 0.01) {
+        const s1 = (0.7 + 0.9 * lineAmt) * k;
+        const g1 = gaussian(L, size, s1), g2 = gaussian(L, size, s1 * 1.6);
+        edge = new Float32Array(n);
+        const phi = 60 + 140 * (1 - lineAmt);
+        for (let i = 0; i < n; i++) {
+          const v = g1[i] - 0.985 * g2[i];
+          // Small negative dips are hair and skin texture, not outlines.
+          edge[i] = v >= -0.006 ? 1 : Math.max(0, 1 + Math.tanh(phi * (v + 0.006)));
+        }
+      }
+
+      const step = 1 / bands, soft = 0.1;
+      const ss = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+      const ink = [52, 30, 34];
+      for (let i = 0; i < n; i++) {
+        const l = L[i];
+        const x = l / step, f = Math.floor(x), frac = x - f;
+        let q = (f + ss(0.5 - soft, 0.5 + soft, frac)) * step;
+        q = Math.min(1, Math.max(0, q));
+        // Anime palettes sit bright: lift and keep shadows from going black.
+        const lift = 0.1 + 0.9 * Math.pow(q, 0.65);
+        let ratio = lift / Math.max(l, 0.02);
+        ratio = Math.min(3, Math.max(0.3, ratio));
+        const lum = lift * 255;
+        const e = edge ? 1 - (1 - edge[i]) * Math.min(1, 0.4 + lineAmt) : 1;
+        const m = alpha ? alpha[i] / 255 : 1;
+        for (let c = 0; c < 3; c++) {
+          let v = a[i * 3 + c] * ratio;
+          // Dark pixels get boosted a lot, which would blow up faint color casts (black hair turning green).
+          v = lum + (v - lum) * 1.15 * Math.min(1, l * 4);
+          v = v * m + d[i * 4 + c] * (1 - m);
+          d[i * 4 + c] = v * e + ink[c] * (1 - e);
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    // ---------- eyes + blush ----------
+
+    function eyeGeom(pts, E) {
+      const up = E.upper.map((i) => pts[i]), lo = E.lower.map((i) => pts[i]);
+      const outer = up[0], inner = up[up.length - 1];
+      const w = Math.hypot(inner.x - outer.x, inner.y - outer.y);
+      const h = Math.hypot(pts[E.top].x - pts[E.bottom].x, pts[E.top].y - pts[E.bottom].y);
+      return { up, lo, outer, inner, w, h };
+    }
+
+    function eyePath(ctx, g) {
+      ctx.beginPath();
+      g.up.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      for (let i = g.lo.length - 2; i > 0; i--) ctx.lineTo(g.lo[i].x, g.lo[i].y);
+      ctx.closePath();
+    }
+
+    function drawEyes(ctx, pts, color, d) {
+      const base = hexToRgb(color);
+      const dark = mixRgb(base, [10, 5, 15], 0.7), light = mixRgb(base, [255, 255, 255], 0.45);
+      const lash = '#2a1a1e';
+      // Stretched real lids and sockets read as dark smudges around drawn eyes, so paint skin over them first.
+      const sample = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height).data;
+      const kk = ctx.canvas.width / SIZE;
+      const skinAt = (x, y) => {
+        const j = (Math.round(y * kk) * ctx.canvas.width + Math.round(x * kk)) * 4;
+        return [sample[j], sample[j + 1], sample[j + 2]];
+      };
+      EYES.forEach((E) => {
+        const g = eyeGeom(pts, E);
+        const c = { x: (g.outer.x + g.inner.x) / 2, y: (g.outer.y + g.inner.y) / 2 };
+        const skin = skinAt(c.x, c.y + d * 0.42);
+        ctx.save();
+        ctx.translate(c.x, c.y - g.h * 0.15);
+        ctx.scale(1, 0.75);
+        const r = g.w * 0.95;
+        const gr = ctx.createRadialGradient(0, 0, r * 0.45, 0, 0, r);
+        gr.addColorStop(0, rgbStr(skin, 0.85));
+        gr.addColorStop(1, rgbStr(skin, 0));
+        ctx.fillStyle = gr;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+      // The skin patch fades real brows, so redraw thin anime brows on the brow landmarks (outer to inner).
+      ctx.strokeStyle = 'rgba(58,36,38,0.85)';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const ids of [[70, 63, 105, 66, 107], [300, 293, 334, 296, 336]]) {
+        ctx.lineWidth = Math.max(1, d * 0.024);
+        ctx.beginPath();
+        ids.forEach((i, j) => (j ? ctx.lineTo(pts[i].x, pts[i].y) : ctx.moveTo(pts[i].x, pts[i].y)));
+        ctx.stroke();
+      }
+      EYES.forEach((E, idx) => {
+        const g = eyeGeom(pts, E);
+        const open = g.h / g.w > 0.14;
+        if (open) {
+          // Iris: whichever iris landmark sits closer to this eye.
+          const em = { x: (g.outer.x + g.inner.x) / 2, y: (g.outer.y + g.inner.y) / 2 };
+          let ic = pts[IRIS[0]];
+          for (const ci of IRIS) if (Math.hypot(pts[ci].x - em.x, pts[ci].y - em.y) < Math.hypot(ic.x - em.x, ic.y - em.y)) ic = pts[ci];
+          const rx = g.w * 0.3, ry = Math.max(rx * 1.25, g.h * 0.62);
+          const cx = ic.x, cy = ic.y - ry * 0.04;
+
+          ctx.save();
+          eyePath(ctx, g);
+          ctx.clip();
+          ctx.fillStyle = '#fbf8f5';
+          ctx.fill();
+          // Iris gradient, dark at the top.
+          let gr = ctx.createLinearGradient(0, cy - ry, 0, cy + ry);
+          gr.addColorStop(0, rgbStr(dark));
+          gr.addColorStop(0.45, rgbStr(base));
+          gr.addColorStop(1, rgbStr(light));
+          ctx.fillStyle = gr;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.lineWidth = Math.max(1, d * 0.012);
+          ctx.strokeStyle = rgbStr(mixRgb(dark, [0, 0, 0], 0.4));
+          ctx.stroke();
+          // Pupil.
+          ctx.fillStyle = rgbStr(mixRgb(dark, [0, 0, 0], 0.55));
+          ctx.beginPath();
+          ctx.ellipse(cx, cy - ry * 0.05, rx * 0.42, ry * 0.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          // Light ring low in the iris.
+          ctx.strokeStyle = rgbStr(light, 0.55);
+          ctx.lineWidth = rx * 0.12;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, rx * 0.72, ry * 0.72, 0, Math.PI * 0.2, Math.PI * 0.8);
+          ctx.stroke();
+          // Upper lid shadow.
+          const top = Math.min(...g.up.map((p) => p.y));
+          gr = ctx.createLinearGradient(0, top, 0, top + g.h * 0.55);
+          gr.addColorStop(0, 'rgba(40,20,40,0.45)');
+          gr.addColorStop(1, 'rgba(40,20,40,0)');
+          ctx.fillStyle = gr;
+          ctx.fillRect(g.outer.x - g.w, top, g.w * 3, g.h);
+          // Highlights.
+          ctx.fillStyle = 'rgba(255,255,255,0.95)';
+          ctx.beginPath();
+          ctx.ellipse(cx - rx * 0.32 * -E.dir, cy - ry * 0.38, rx * 0.3, ry * 0.24, -0.4 * E.dir, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(cx + rx * 0.35 * -E.dir, cy + ry * 0.38, rx * 0.12, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // Upper lash: a filled band along the lid, thickest at the outer corner, with a flick.
+        const n = g.up.length;
+        const thick = (t) => d * (open ? 0.05 : 0.03) * (1 - 0.65 * t);
+        ctx.fillStyle = lash;
+        ctx.beginPath();
+        g.up.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y + d * 0.005) : ctx.moveTo(p.x, p.y + d * 0.005)));
+        for (let i = n - 1; i >= 0; i--) ctx.lineTo(g.up[i].x, g.up[i].y - thick(i / (n - 1)));
+        ctx.lineTo(g.outer.x + E.dir * d * 0.13, g.outer.y - d * 0.09);
+        ctx.closePath();
+        ctx.fill();
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = lash;
+        if (open) {
+          // Lower line on the outer half.
+          ctx.globalAlpha = 0.7;
+          ctx.lineWidth = Math.max(1, d * 0.014);
+          ctx.beginPath();
+          g.lo.slice(0, 5).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x + E.dir * d * 0.02, p.y)));
+          ctx.stroke();
+          // Lid crease.
+          ctx.globalAlpha = 0.4;
+          ctx.lineWidth = Math.max(1, d * 0.01);
+          ctx.beginPath();
+          g.up.slice(1, n - 2).forEach((p, i) => {
+            const y = p.y - g.h * 0.45 - d * 0.03;
+            i ? ctx.lineTo(p.x, y) : ctx.moveTo(p.x, y);
+          });
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      });
+    }
+
+    function drawBlush(ctx, pts, d) {
+      const A = faceAnchors(pts);
+      for (const e of [A.eyeL, A.eyeR]) {
+        const cx = e.x + Math.sign(e.x - A.cx) * d * 0.06, cy = e.y + d * 0.55;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(1, 0.45);
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, d * 0.3);
+        g.addColorStop(0, 'rgba(255,110,130,0.42)');
+        g.addColorStop(1, 'rgba(255,110,130,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(0, 0, d * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        ctx.strokeStyle = 'rgba(225,80,105,0.55)';
+        ctx.lineWidth = Math.max(1, d * 0.011);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        for (let j = -1; j <= 1; j++) {
+          const x = cx + j * d * 0.08;
+          ctx.moveTo(x + d * 0.03, cy - d * 0.04);
+          ctx.lineTo(x - d * 0.03, cy + d * 0.04);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // ---------- render ----------
+
+    function settings() {
+      return {
+        prop: propEl.value / 100,
+        eye: eyeEl.value / 100,
+        line: lineEl.value / 100,
+        bands: +bandsEl.value,
+        eyeColor: eyeColorEl.value === 'auto' ? (face ? face.irisColor : '#7a4a2a') : eyeColorEl.value,
+        bg: bgEl.value,
+        eyes: drawEyesEl.checked,
+        blush: blushEl.checked,
+      };
+    }
+
+    function render(size) {
+      if (!face) return;
+      const t0 = performance.now();
+      const s = settings();
+      const k = size / SIZE;
+      if (out.width !== size) out.width = out.height = size;
+      const target = animeShape(face.pts, s.prop, s.eye);
+      const person = buf('person', size);
+      warpInto(person, face.aligned, face.pts, target, face.tris, k);
+
+      outCtx.setTransform(1, 0, 0, 1, 0, 0);
+      outCtx.globalCompositeOperation = 'source-over';
+      outCtx.globalAlpha = 1;
+      let alpha = null;
+      if (s.bg !== 'original' && face.mask) {
+        const m = buf('mask', size);
+        warpInto(m, face.mask, face.pts, target, face.tris, k);
+        const pctx = person.getContext('2d');
+        pctx.globalCompositeOperation = 'destination-in';
+        pctx.drawImage(m, 0, 0);
+        pctx.globalCompositeOperation = 'source-over';
+        drawBackground(outCtx, size, s.bg);
+        outCtx.drawImage(person, 0, 0);
+        const md = m.getContext('2d').getImageData(0, 0, size, size).data;
+        alpha = new Uint8ClampedArray(size * size);
+        for (let i = 0; i < alpha.length; i++) alpha[i] = md[i * 4 + 3];
+      } else {
+        outCtx.clearRect(0, 0, size, size);
+        outCtx.drawImage(person, 0, 0);
+      }
+
+      celShade(outCtx, size, s.bands, s.line, alpha);
+
+      const A = faceAnchors(target);
+      outCtx.setTransform(k, 0, 0, k, 0, 0);
+      if (s.blush) drawBlush(outCtx, target, A.d);
+      if (s.eyes) drawEyes(outCtx, target, s.eyeColor, A.d);
+      outCtx.setTransform(1, 0, 0, 1, 0, 0);
+      lastMs = performance.now() - t0;
+    }
+    let lastMs = 0;
+
+    let pendingSize = 0;
+    function scheduleRender(size) {
+      const first = !pendingSize;
+      pendingSize = Math.max(pendingSize, size);
+      if (!first) return;
+      requestAnimationFrame(() => { const sz = pendingSize; pendingSize = 0; render(sz); });
+    }
+
+    // ---------- wiring ----------
+
+    for (const [el, outEl] of [[propEl, 'propOut'], [eyeEl, 'eyeOut'], [lineEl, 'lineOut'], [bandsEl, 'bandsOut']]) {
+      el.addEventListener('input', () => { $(outEl).textContent = el.value; scheduleRender(PREVIEW); });
+      el.addEventListener('change', () => scheduleRender(SIZE));
+    }
+    [eyeColorEl, bgEl, drawEyesEl, blushEl].forEach((el) => el.addEventListener('input', () => scheduleRender(SIZE)));
+
+    fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadBlob(fileInput.files[0]); fileInput.value = ''; });
+    drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', (e) => {
+      e.preventDefault();
+      drop.classList.remove('over');
+      const f = [...e.dataTransfer.files].find((x) => /^image\//.test(x.type) || /\.(heic|heif)$/i.test(x.name));
+      if (f) loadBlob(f);
+    });
+    window.addEventListener('paste', (e) => {
+      const it = [...(e.clipboardData?.items || [])].find((x) => x.type.startsWith('image/'));
+      if (it) loadBlob(it.getAsFile());
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      render(SIZE);
+      out.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'anime-face.png';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }, 'image/png');
+    });
+
+    // Debug/testing: ?f=path loads a same-origin image; other params preset the controls.
+    const params = new URLSearchParams(location.search);
+    for (const [key, el] of [['prop', propEl], ['eye', eyeEl], ['line', lineEl], ['bands', bandsEl], ['bg', bgEl], ['color', eyeColorEl]]) {
+      if (params.has(key)) { el.value = params.get(key); el.dispatchEvent(new Event('input')); }
+    }
+    const f = params.get('f');
+    if (f) {
+      const u = new URL(f, location.href);
+      if (u.origin === location.origin) fetch(u).then((r) => r.blob()).then(loadBlob).catch(() => setStatus("couldn't load test image", true));
+    }
+
+    window.animeFace = { loadBlob, render, face: () => face, ms: () => lastMs, set: (id, v) => { const el = $(id); if (el.type === 'checkbox') el.checked = v; else el.value = v; } };
+  </script>
+</body>
+</html>
