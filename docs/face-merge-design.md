@@ -64,3 +64,31 @@ Moving the slider re-runs steps 5–9 only. Detection runs once per image. Canva
   - no-face handling
   - HEIC upload
 - Test photos stay in a git-ignored folder and are never committed.
+
+---
+
+# Update: blend up to 10 faces
+
+## Decisions
+
+| Question | Decision | Why |
+| --- | --- | --- |
+| How many faces | 1 to 10. The merge appears once 2 faces are added. | 10 keeps the page fast enough on phones, since every face is warped on every render. |
+| Input | A grid of face cards plus an "add faces" tile. The tile accepts several files at once, by click, drop or paste. Each card has a remove button. | Adding 10 photos one at a time would be tedious. |
+| Weighting | Each card gets its own weight slider (0–100, default 50). Weights are normalized, so the result is a weighted average. An "equal" button resets them all. | Covers both "average of everyone" and "mostly me with a bit of you". With 2 faces it behaves like the old A↔B slider. |
+| Shape vs texture | A "shape from" selector: *blend* (the same weighted average) or *face N* (one face's geometry with everyone's skin). Replaces the shape slider. | A per-face shape weight would double the sliders. One selector keeps the most fun use case. |
+| Swap button | Removed | Doesn't mean anything with N faces. |
+| Debug loader | `?f=path1,path2,…` (same-origin only). `?a=&b=` still works. | Testing. |
+
+## Algorithm changes
+
+- **Target geometry:** `P = Σ wᵢ·Pᵢ` (normalized weights), or one face's points when "shape from" is set to a face.
+- **Triangulation:** done once on the plain mean of all faces, and redone when a face is added or removed. Point correspondence is still one-to-one, since every face has the same 478 landmarks plus 16 frame points.
+- **Warp:** every face with weight > 0 is warped into its own buffer.
+- **Blend:** a running weighted average built with alpha: draw face 1 at alpha 1, then face k at alpha `wₖ / (w₁+…+wₖ)`. This gives the exact weighted mean with no float buffers.
+- **Performance:** 10 faces × ~950 triangles per render. While a slider is being dragged, it renders at 256 px. On release, it renders at 512 px.
+
+## Risks
+
+- **Blur.** Averaging many faces softens features: hair, glasses and backgrounds wash out. That is the classic "average face" look, and the fade-background option hides most of it.
+- **Bad photos.** One sharply angled face drags the average shape. Lowering that face's weight is the fix.

@@ -22,3 +22,34 @@ See `face-merge-design.md` for the design.
 9. **Controls.** Blend slider, shape slider with a link toggle, mesh toggle, swap and download PNG. Rendering is throttled with requestAnimationFrame.
 10. **Projects entry.** Add a `project-item` link in `index.html` that matches the existing entries.
 11. **Test.** Run a local server, open the page with photos from a git-ignored `.face-test/`, screenshot results at 0 / 50 / 100% and the mesh view, then check the no-face case and the console for errors.
+
+---
+
+# Update plan: up to 10 faces
+
+1. **Markup.**
+   - Replace the two fixed slots with a `.face-grid` of cards and a final "add faces" tile (`<input multiple>`), which hides once there are 10 faces.
+   - Each card has a thumbnail, a status line, a weight slider and a × button.
+2. **Controls.**
+   - Remove the blend and shape sliders and the swap button.
+   - Add a "shape from" `<select>` (blend / face 1…N) and an "equal weights" button.
+   - Keep the mesh, fade background and download controls.
+3. **State.**
+   - `faces` becomes an array of `{ id, aligned, pts, weight, card }`.
+   - Cards that are still detecting show their status but are left out of the merge until they're ready.
+   - Removing a card drops it and clears the cached triangulation.
+4. **Intake.**
+   - `addFiles(files)` takes as many as there's room for (10 minus the current count), creates the cards, and detects faces one by one using the shared landmarker.
+   - Cards with no face found stay visible with an error, are excluded from the merge, and can be removed.
+5. **Render.**
+   - Normalize the weights (all zero falls back to equal), then work out the target points and the triangulation on the mean shape.
+   - Warp each face with weight > 0 into a pooled buffer, then do the running-average composite, then feather and mesh.
+   - `render(size)` takes 256 while dragging (`input` event) and 512 on `change`.
+6. **Download.** Re-render at 512 before exporting.
+7. **Debug loader.** `?f=a,b,c` plus the old `?a=&b=`.
+8. **Copy.** Update the subtitle and how-it-works text for N faces.
+9. **Test.**
+   - Load 2, 5 and 10 photos from `.face-test/` and save result images.
+   - Check uneven weights, "shape from" a single face, removing a face and the no-face card.
+   - Time one 10-face render.
+   - Check the mobile layout.

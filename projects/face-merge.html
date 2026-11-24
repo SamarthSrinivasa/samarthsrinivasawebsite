@@ -78,18 +78,7 @@
   .model-status.ok { color: var(--accent); }
   .model-status.err, .slot-status.err { color: #c96a4a; }
 
-  .slots {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-  }
 
-  .slot {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
 
   .drop {
     position: relative;
@@ -204,8 +193,36 @@
   .how-name { font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent); margin: 0 0 4px; }
   .how-desc { font-size: 0.92rem; line-height: 1.6; color: var(--text-muted); margin: 0; }
 
+  .face-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 16px;
+  }
+  .face-card { display: flex; flex-direction: column; gap: 6px; }
+  .face-card .drop { cursor: default; border-style: solid; }
+  .face-card.bad .drop { border-color: #c96a4a; }
+  .face-card.bad .weight { opacity: 0.35; pointer-events: none; }
+  .remove-btn {
+    position: absolute; top: 6px; right: 6px;
+    width: 24px; height: 24px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-muted);
+    font-family: var(--font-mono); font-size: 0.9rem; line-height: 1; cursor: pointer;
+  }
+  .remove-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .face-label {
+    position: absolute; top: 6px; left: 8px;
+    font-family: var(--font-mono); font-size: 0.72rem; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  }
+  .add-tile { aspect-ratio: 1 / 1; }
+  .control select {
+    font-family: var(--font-mono); font-size: 0.76rem; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+  }
+  .control-note { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); line-height: 1.6; margin: 0; }
+
   @media (max-width: 640px) {
     .result-wrap { grid-template-columns: 1fr; }
+    .face-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   }
 </style>
 </head>
@@ -216,7 +233,6 @@
       <a href="../index.html#home" class="nav-link">Home</a>
       <a href="../index.html#about" class="nav-link">About</a>
       <a href="../index.html#projects" class="nav-link active">Projects</a>
-      <a href="../index.html#films" class="nav-link">Films</a>
     </nav>
 
     <div class="theme-toggle" role="group" aria-label="Theme">
@@ -236,8 +252,8 @@
   <div class="fm-page">
     <h1 class="fm-title">Face Merge</h1>
     <p class="fm-sub">
-      Drop in photos of two different people and see their faces merged into one. It finds 478 points on
-      each face, lines the faces up, averages their shape, warps both photos onto that shape, and blends them.
+      Drop in photos of up to ten different people and see their faces merged into one. It finds 478 points on
+      each face, lines the faces up, averages their shape, warps every photo onto that shape, and blends them.
     </p>
     <p class="fm-privacy">
       everything runs in your browser — photos are never uploaded or stored.<br />
@@ -245,24 +261,12 @@
     </p>
 
     <div class="fm-panel">
-      <p class="panel-title"><span>faces</span><span class="model-status" id="modelStatus">loading face model…</span></p>
-      <div class="slots">
-        <div class="slot" data-slot="0">
-          <label class="drop" id="drop0">
-            <input type="file" accept="image/*,.heic,.heif" />
-            <canvas width="512" height="512"></canvas>
-            <span class="drop-hint"><b>A</b>click, drop or paste a photo</span>
-          </label>
-          <span class="slot-status" id="status0"></span>
-        </div>
-        <div class="slot" data-slot="1">
-          <label class="drop" id="drop1">
-            <input type="file" accept="image/*,.heic,.heif" />
-            <canvas width="512" height="512"></canvas>
-            <span class="drop-hint"><b>B</b>click, drop or paste a photo</span>
-          </label>
-          <span class="slot-status" id="status1"></span>
-        </div>
+      <p class="panel-title"><span>faces <span id="faceCount">0 / 10</span></span><span class="model-status" id="modelStatus">loading face model…</span></p>
+      <div class="face-grid" id="faceGrid">
+        <label class="drop add-tile" id="addTile">
+          <input type="file" accept="image/*,.heic,.heif" multiple />
+          <span class="drop-hint"><b>+</b>add faces<br />click, drop or paste — up to 10</span>
+        </label>
       </div>
     </div>
 
@@ -271,24 +275,20 @@
       <div class="result-wrap">
         <div class="result-canvas-box" id="resultBox">
           <canvas id="result" width="512" height="512"></canvas>
-          <span class="result-empty">add two faces to see the merge</span>
+          <span class="result-empty">add at least two faces to see the merge</span>
         </div>
         <div class="controls">
           <label class="control">
-            <span class="control-row">blend <output id="blendOut">50%</output></span>
-            <input type="range" id="blend" min="0" max="100" value="50" />
-          </label>
-          <label class="check"><input type="checkbox" id="linkShape" checked /> shape follows blend</label>
-          <label class="control">
-            <span class="control-row">shape <output id="shapeOut">50%</output></span>
-            <input type="range" id="shape" min="0" max="100" value="50" disabled />
+            shape from
+            <select id="shapeFrom"><option value="blend">blend (weighted average)</option></select>
           </label>
           <label class="check"><input type="checkbox" id="showMesh" /> show mesh</label>
           <label class="check"><input type="checkbox" id="crop" checked /> fade background</label>
           <div class="btn-row">
-            <button class="fm-btn" id="swapBtn" disabled>swap a ↔ b</button>
+            <button class="fm-btn" id="equalBtn" disabled>equal weights</button>
             <button class="fm-btn" id="downloadBtn" disabled>download png</button>
           </div>
+          <p class="control-note">each face's slider sets how much of it goes into the merge.</p>
         </div>
       </div>
     </div>
@@ -305,11 +305,11 @@
       </div>
       <div class="how-step">
         <p class="how-name">3. average + triangulate</p>
-        <p class="how-desc">The target shape is a weighted average of the two point sets. A Delaunay triangulation splits it into about a thousand triangles.</p>
+        <p class="how-desc">The target shape is a weighted average of every face's points. A Delaunay triangulation splits it into about a thousand triangles.</p>
       </div>
       <div class="how-step">
         <p class="how-name">4. warp + blend</p>
-        <p class="how-desc">Every triangle in each photo gets its own affine transform onto the matching target triangle. The two warped photos are then cross-faded. The <em>shape</em> slider sets the geometry and <em>blend</em> sets the skin and color, so you can put A's skin on B's face shape.</p>
+        <p class="how-desc">Every triangle in each photo gets its own affine transform onto the matching target triangle. The warped photos are then averaged using each face's weight. <em>Shape from</em> can lock the geometry to one face, so everyone's skin goes onto that one face's shape.</p>
       </div>
     </div>
   </div>
@@ -364,6 +364,8 @@
     import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
 
     const SIZE = 512;
+    const PREVIEW = 256;
+    const MAX_FACES = 10;
     const MAX_INPUT = 1024;
     // Eye centers land here in the aligned frame.
     const EYE_L = { x: SIZE * 0.37, y: SIZE * 0.42 };
@@ -376,15 +378,19 @@
 
     const $ = (id) => document.getElementById(id);
     const modelStatus = $('modelStatus');
+    const grid = $('faceGrid');
+    const addTile = $('addTile');
+    const addInput = addTile.querySelector('input');
     const resultBox = $('resultBox');
     const out = $('result');
     const outCtx = out.getContext('2d');
-    const blendEl = $('blend'), shapeEl = $('shape'), linkEl = $('linkShape');
+    const shapeFromEl = $('shapeFrom');
     const meshEl = $('showMesh'), cropEl = $('crop');
-    const swapBtn = $('swapBtn'), downloadBtn = $('downloadBtn');
+    const equalBtn = $('equalBtn'), downloadBtn = $('downloadBtn');
 
-    // Per-slot state: { aligned: canvas, pts: [{x,y}] in aligned coords }
-    let faces = [null, null];
+    // Each entry: { id, card, status, slider, weight, face: { aligned, pts } | null, busy }
+    let entries = [];
+    let nextId = 1;
     let triangles = null;
     let landmarker = null;
     const modelReady = initModel();
@@ -452,25 +458,79 @@
       return c;
     }
 
-    function setStatus(i, text, isErr) {
-      const el = $('status' + i);
-      el.textContent = text;
-      el.className = 'slot-status' + (isErr ? ' err' : '');
+    function createEntry() {
+      const id = nextId++;
+      const card = document.createElement('div');
+      card.className = 'face-card';
+      card.innerHTML = `
+        <div class="drop has-img">
+          <canvas width="${SIZE}" height="${SIZE}"></canvas>
+          <button class="remove-btn" title="remove face" aria-label="remove face">×</button>
+          <span class="face-label"></span>
+        </div>
+        <span class="slot-status">reading…</span>
+        <label class="control weight">
+          <span class="control-row">weight <output>50</output></span>
+          <input type="range" min="0" max="100" value="50" />
+        </label>`;
+      grid.insertBefore(card, addTile);
+      const entry = {
+        id, card, face: null, weight: 50, busy: true,
+        status: card.querySelector('.slot-status'),
+        slider: card.querySelector('input[type="range"]'),
+        output: card.querySelector('output'),
+      };
+      entry.slider.addEventListener('input', () => setWeight(entry, +entry.slider.value, true));
+      entry.slider.addEventListener('change', () => scheduleRender(SIZE));
+      card.querySelector('.remove-btn').addEventListener('click', () => removeEntry(entry));
+      entries.push(entry);
+      return entry;
     }
 
-    async function handleBlob(i, blob) {
-      setStatus(i, 'reading…');
+    function setWeight(entry, w, preview) {
+      entry.weight = w;
+      entry.slider.value = w;
+      entry.output.textContent = w;
+      scheduleRender(preview ? PREVIEW : SIZE);
+    }
+
+    function setStatus(entry, text, isErr) {
+      entry.status.textContent = text;
+      entry.status.className = 'slot-status' + (isErr ? ' err' : '');
+      entry.card.classList.toggle('bad', !!isErr);
+    }
+
+    function removeEntry(entry) {
+      entries = entries.filter((e) => e !== entry);
+      entry.card.remove();
+      triangles = null;
+      refresh();
+    }
+
+    // Detection runs one image at a time; the landmarker is synchronous and shared.
+    let queue = Promise.resolve();
+    function addBlobs(blobs) {
+      note = '';
+      const room = MAX_FACES - entries.length;
+      const take = [...blobs].slice(0, Math.max(0, room));
+      if (blobs.length > take.length) flashNote(`only ${MAX_FACES} faces fit — skipped ${blobs.length - take.length}`);
+      for (const blob of take) {
+        const entry = createEntry();
+        queue = queue.then(() => processEntry(entry, blob));
+      }
+      refresh();
+    }
+
+    async function processEntry(entry, blob) {
       try {
         const src = await blobToCanvas(blob);
-        setStatus(i, 'finding face…');
+        setStatus(entry, 'finding face…');
         await modelReady;
-        const result = landmarker.detect(src);
-        const all = result.faceLandmarks || [];
+        if (!entries.includes(entry)) return;
+        const all = landmarker.detect(src).faceLandmarks || [];
         if (!all.length) {
-          faces[i] = null;
-          clearThumb(i);
-          setStatus(i, 'no face found — try a clearer, front-facing photo', true);
-          update();
+          entry.card.querySelector('canvas').getContext('2d').drawImage(src, 0, 0, SIZE, SIZE);
+          setStatus(entry, 'no face found — try a clearer, front-facing photo', true);
           return;
         }
         // Largest face wins.
@@ -482,18 +542,24 @@
           if (area > bestArea) { bestArea = area; best = lm; }
         }
         const raw = best.map((p) => ({ x: p.x * src.width, y: p.y * src.height }));
-        faces[i] = alignFace(src, raw);
-        drawThumb(i);
-        setStatus(i, all.length > 1 ? `${all.length} faces found — using the largest` : 'face found');
+        entry.face = alignFace(src, raw);
+        drawThumb(entry);
+        setStatus(entry, all.length > 1 ? `${all.length} faces — using the largest` : 'face found');
         triangles = null;
-        update();
       } catch (err) {
         console.error(err);
-        faces[i] = null;
-        clearThumb(i);
-        setStatus(i, err.message || 'something went wrong', true);
-        update();
+        setStatus(entry, err.message || 'something went wrong', true);
+      } finally {
+        entry.busy = false;
+        refresh();
       }
+    }
+
+    // Shown next to the face count until the next batch of photos is added.
+    let note = '';
+    function flashNote(text) {
+      note = text;
+      refresh();
     }
 
     // ---------- alignment ----------
@@ -529,64 +595,62 @@
       return { aligned, pts };
     }
 
-    // ---------- thumbnails ----------
-
-    function drawThumb(i) {
-      const drop = $('drop' + i);
-      const c = drop.querySelector('canvas');
-      const ctx = c.getContext('2d');
-      const f = faces[i];
-      ctx.drawImage(f.aligned, 0, 0, c.width, c.height);
+    function drawThumb(entry) {
+      const ctx = entry.card.querySelector('canvas').getContext('2d');
+      const f = entry.face;
+      ctx.drawImage(f.aligned, 0, 0);
       ctx.fillStyle = 'rgba(127, 203, 156, 0.85)';
       for (let j = 0; j < 478; j++) {
         ctx.beginPath();
         ctx.arc(f.pts[j].x, f.pts[j].y, 1.1, 0, Math.PI * 2);
         ctx.fill();
       }
-      drop.classList.add('has-img');
-    }
-
-    function clearThumb(i) {
-      $('drop' + i).classList.remove('has-img');
     }
 
     // ---------- warp + blend ----------
 
-    const bufA = document.createElement('canvas');
-    const bufB = document.createElement('canvas');
-    bufA.width = bufA.height = bufB.width = bufB.height = SIZE;
+    const bufPool = [];
+    function buffer(i, size) {
+      if (!bufPool[i]) bufPool[i] = document.createElement('canvas');
+      const c = bufPool[i];
+      if (c.width !== size) c.width = c.height = size;
+      return c;
+    }
 
-    function warpInto(dstCanvas, srcCanvas, srcPts, dstPts, tris) {
+    // Warp srcCanvas so srcPts land on dstPts; k scales destination coords (for low-res previews).
+    function warpInto(dstCanvas, srcCanvas, srcPts, dstPts, tris, k) {
       const ctx = dstCanvas.getContext('2d');
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, SIZE, SIZE);
+      ctx.clearRect(0, 0, dstCanvas.width, dstCanvas.height);
       for (let t = 0; t < tris.length; t += 3) {
         const i0 = tris[t], i1 = tris[t + 1], i2 = tris[t + 2];
         const s0 = srcPts[i0], s1 = srcPts[i1], s2 = srcPts[i2];
-        const d0 = dstPts[i0], d1 = dstPts[i1], d2 = dstPts[i2];
+        const d0x = dstPts[i0].x * k, d0y = dstPts[i0].y * k;
+        const d1x = dstPts[i1].x * k, d1y = dstPts[i1].y * k;
+        const d2x = dstPts[i2].x * k, d2y = dstPts[i2].y * k;
         const ux = s1.x - s0.x, uy = s1.y - s0.y, vx = s2.x - s0.x, vy = s2.y - s0.y;
         const det = ux * vy - vx * uy;
         if (Math.abs(det) < 1e-6) continue;
-        const Ux = d1.x - d0.x, Uy = d1.y - d0.y, Vx = d2.x - d0.x, Vy = d2.y - d0.y;
+        const Ux = d1x - d0x, Uy = d1y - d0y, Vx = d2x - d0x, Vy = d2y - d0y;
         const a = (Ux * vy - Vx * uy) / det;
         const c = (Vx * ux - Ux * vx) / det;
         const b = (Uy * vy - Vy * uy) / det;
         const d = (Vy * ux - Uy * vx) / det;
-        const e = d0.x - a * s0.x - c * s0.y;
-        const f = d0.y - b * s0.x - d * s0.y;
+        const e = d0x - a * s0.x - c * s0.y;
+        const f = d0y - b * s0.x - d * s0.y;
 
         // Clip to the destination triangle, nudged outward to hide hairline seams.
-        const cx = (d0.x + d1.x + d2.x) / 3, cy = (d0.y + d1.y + d2.y) / 3;
-        const grow = (p) => {
-          const gx = p.x - cx, gy = p.y - cy, len = Math.hypot(gx, gy) || 1;
-          return [p.x + (gx / len) * 0.7, p.y + (gy / len) * 0.7];
+        const cx = (d0x + d1x + d2x) / 3, cy = (d0y + d1y + d2y) / 3;
+        const grow = (x, y) => {
+          const gx = x - cx, gy = y - cy, len = Math.hypot(gx, gy) || 1;
+          return [x + (gx / len) * 0.7, y + (gy / len) * 0.7];
         };
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.beginPath();
-        ctx.moveTo(...grow(d0));
-        ctx.lineTo(...grow(d1));
-        ctx.lineTo(...grow(d2));
+        ctx.moveTo(...grow(d0x, d0y));
+        ctx.lineTo(...grow(d1x, d1y));
+        ctx.lineTo(...grow(d2x, d2y));
         ctx.closePath();
         ctx.clip();
         ctx.setTransform(a, b, c, d, e, f);
@@ -595,34 +659,60 @@
       }
     }
 
-    const lerpPts = (A, B, t) => A.map((p, i) => ({ x: p.x + (B[i].x - p.x) * t, y: p.y + (B[i].y - p.y) * t }));
+    const readyEntries = () => entries.filter((e) => e.face);
 
-    function render() {
-      const [A, B] = faces;
-      if (!A || !B) return;
-      const t = blendEl.value / 100;
-      const st = (linkEl.checked ? blendEl.value : shapeEl.value) / 100;
+    function weightedPts(list, ws) {
+      const n = list[0].face.pts.length;
+      const res = new Array(n);
+      for (let j = 0; j < n; j++) {
+        let x = 0, y = 0;
+        for (let i = 0; i < list.length; i++) {
+          x += list[i].face.pts[j].x * ws[i];
+          y += list[i].face.pts[j].y * ws[i];
+        }
+        res[j] = { x, y };
+      }
+      return res;
+    }
+
+    function render(size) {
+      const list = readyEntries();
+      if (list.length < 2) return;
+      let ws = list.map((e) => e.weight);
+      let total = ws.reduce((s, w) => s + w, 0);
+      if (total === 0) { ws = ws.map(() => 1); total = ws.length; }
+      ws = ws.map((w) => w / total);
 
       if (!triangles) {
-        // Triangulate the halfway shape once; the topology is reused for every slider position.
-        const midPts = lerpPts(A.pts, B.pts, 0.5);
-        triangles = new Delaunator(midPts.flatMap((p) => [p.x, p.y])).triangles;
+        // Triangulate the plain mean shape; the topology is reused for every weighting.
+        const mean = weightedPts(list, list.map(() => 1 / list.length));
+        triangles = new Delaunator(mean.flatMap((p) => [p.x, p.y])).triangles;
       }
-      const target = lerpPts(A.pts, B.pts, st);
-      warpInto(bufA, A.aligned, A.pts, target, triangles);
-      warpInto(bufB, B.aligned, B.pts, target, triangles);
 
+      const shapeSrc = list.find((e) => String(e.id) === shapeFromEl.value);
+      const target = shapeSrc ? shapeSrc.face.pts : weightedPts(list, ws);
+      const k = size / SIZE;
+
+      if (out.width !== size) out.width = out.height = size;
       outCtx.setTransform(1, 0, 0, 1, 0, 0);
       outCtx.globalCompositeOperation = 'source-over';
-      outCtx.globalAlpha = 1;
-      outCtx.clearRect(0, 0, SIZE, SIZE);
-      outCtx.drawImage(bufA, 0, 0);
-      outCtx.globalAlpha = t;
-      outCtx.drawImage(bufB, 0, 0);
+      outCtx.clearRect(0, 0, size, size);
+      // Running weighted average: face i is drawn at alpha w_i / (w_1 + … + w_i).
+      let cum = 0;
+      list.forEach((entry, i) => {
+        if (ws[i] <= 0) return;
+        cum += ws[i];
+        const buf = buffer(i, size);
+        warpInto(buf, entry.face.aligned, entry.face.pts, target, triangles, k);
+        outCtx.globalAlpha = ws[i] / cum;
+        outCtx.drawImage(buf, 0, 0);
+      });
       outCtx.globalAlpha = 1;
 
+      outCtx.setTransform(k, 0, 0, k, 0, 0);
       if (cropEl.checked) featherFace(target);
-      if (meshEl.checked) drawMesh(target);
+      if (meshEl.checked) drawMesh(target, k);
+      outCtx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
     function featherFace(pts) {
@@ -645,10 +735,10 @@
       outCtx.restore();
     }
 
-    function drawMesh(pts) {
+    function drawMesh(pts, k) {
       outCtx.save();
       outCtx.strokeStyle = 'rgba(127, 203, 156, 0.75)';
-      outCtx.lineWidth = 0.9;
+      outCtx.lineWidth = 0.9 / k;
       outCtx.beginPath();
       for (let t = 0; t < triangles.length; t += 3) {
         const a = pts[triangles[t]], b = pts[triangles[t + 1]], c = pts[triangles[t + 2]];
@@ -661,82 +751,82 @@
       outCtx.restore();
     }
 
-    let pending = false;
-    function update() {
-      $('blendOut').textContent = blendEl.value + '%';
-      if (linkEl.checked) shapeEl.value = blendEl.value;
-      shapeEl.disabled = linkEl.checked;
-      $('shapeOut').textContent = shapeEl.value + '%';
+    let pendingSize = 0;
+    function scheduleRender(size) {
+      const first = !pendingSize;
+      pendingSize = Math.max(pendingSize, size);
+      if (!first) return;
+      requestAnimationFrame(() => { const s = pendingSize; pendingSize = 0; render(s); });
+    }
 
-      const ready = !!(faces[0] && faces[1]);
+    // Sync labels, the shape selector and buttons with the current faces, then render.
+    function refresh() {
+      const list = readyEntries();
+      entries.forEach((e, i) => {
+        e.card.querySelector('.face-label').textContent = i + 1;
+      });
+      $('faceCount').textContent = `${entries.length} / ${MAX_FACES}` + (note ? ` · ${note}` : '');
+      addTile.style.display = entries.length >= MAX_FACES ? 'none' : '';
+
+      const keep = shapeFromEl.value;
+      shapeFromEl.innerHTML = '<option value="blend">blend (weighted average)</option>' +
+        list.map((e) => `<option value="${e.id}">face ${entries.indexOf(e) + 1}</option>`).join('');
+      shapeFromEl.value = list.some((e) => String(e.id) === keep) ? keep : 'blend';
+
+      const ready = list.length >= 2;
       resultBox.classList.toggle('ready', ready);
-      swapBtn.disabled = !(faces[0] || faces[1]);
       downloadBtn.disabled = !ready;
-      if (!ready || pending) return;
-      pending = true;
-      requestAnimationFrame(() => { pending = false; render(); });
+      equalBtn.disabled = list.length < 2;
+      if (ready) scheduleRender(SIZE);
     }
 
     // ---------- wiring ----------
 
-    [0, 1].forEach((i) => {
-      const drop = $('drop' + i);
-      const input = drop.querySelector('input');
-      input.addEventListener('change', () => { if (input.files[0]) handleBlob(i, input.files[0]); input.value = ''; });
-      drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
-      drop.addEventListener('dragleave', () => drop.classList.remove('over'));
-      drop.addEventListener('drop', (e) => {
-        e.preventDefault();
-        drop.classList.remove('over');
-        const file = e.dataTransfer.files[0];
-        if (file) handleBlob(i, file);
-      });
+    addInput.addEventListener('change', () => { addBlobs(addInput.files); addInput.value = ''; });
+    addTile.addEventListener('dragover', (e) => { e.preventDefault(); addTile.classList.add('over'); });
+    addTile.addEventListener('dragleave', () => addTile.classList.remove('over'));
+    addTile.addEventListener('drop', (e) => {
+      e.preventDefault();
+      addTile.classList.remove('over');
+      addBlobs([...e.dataTransfer.files].filter((f) => /^image\//.test(f.type) || /\.(heic|heif)$/i.test(f.name)));
     });
-
-    // Paste fills the first empty slot (or A).
     window.addEventListener('paste', (e) => {
-      const item = [...(e.clipboardData?.items || [])].find((it) => it.type.startsWith('image/'));
-      if (!item) return;
-      handleBlob(faces[0] ? (faces[1] ? 0 : 1) : 0, item.getAsFile());
+      const files = [...(e.clipboardData?.items || [])].filter((it) => it.type.startsWith('image/')).map((it) => it.getAsFile());
+      if (files.length) addBlobs(files);
     });
 
-    [blendEl, shapeEl, linkEl, meshEl, cropEl].forEach((el) => el.addEventListener('input', update));
-
-    swapBtn.addEventListener('click', () => {
-      faces = [faces[1], faces[0]];
-      const s0 = $('status0').textContent, s1 = $('status1').textContent;
-      [0, 1].forEach((i) => (faces[i] ? drawThumb(i) : clearThumb(i)));
-      setStatus(0, s1); setStatus(1, s0);
-      update();
-    });
+    [shapeFromEl, meshEl, cropEl].forEach((el) => el.addEventListener('input', () => scheduleRender(SIZE)));
+    equalBtn.addEventListener('click', () => entries.forEach((e) => setWeight(e, 50, false)));
 
     downloadBtn.addEventListener('click', () => {
+      render(SIZE);
       out.toBlob((blob) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `face-merge-${blendEl.value}.png`;
+        a.download = `face-merge-${readyEntries().length}.png`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }, 'image/png');
     });
 
-    // Debug/testing: ?a=path&b=path loads same-origin images.
+    // Debug/testing: ?f=path1,path2,… (or ?a=&b=) loads same-origin images.
     const params = new URLSearchParams(location.search);
-    ['a', 'b'].forEach(async (key, i) => {
-      const v = params.get(key);
-      if (!v) return;
-      const url = new URL(v, location.href);
-      if (url.origin !== location.origin) return;
-      try {
-        const res = await fetch(url);
-        handleBlob(i, await res.blob());
-      } catch (e) { setStatus(i, "couldn't load test image", true); }
-    });
-    if (params.get('t')) { blendEl.value = params.get('t'); }
-    if (params.get('mesh')) { meshEl.checked = true; }
+    const paths = (params.get('f') || [params.get('a'), params.get('b')].filter(Boolean).join(','))
+      .split(',').filter(Boolean)
+      .map((v) => new URL(v, location.href))
+      .filter((u) => u.origin === location.origin);
+    if (paths.length) {
+      Promise.all(paths.map((u) => fetch(u).then((r) => r.blob())))
+        .then(addBlobs)
+        .catch(() => flashNote("couldn't load test images"));
+    }
+    if (params.get('mesh')) meshEl.checked = true;
 
-    update();
+    // Exposed for tests.
+    window.faceMerge = { entries: () => entries, setWeight, render, removeEntry, refresh };
+
+    refresh();
   </script>
 </body>
 </html>
