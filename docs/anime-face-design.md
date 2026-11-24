@@ -77,3 +77,29 @@ Everything runs in the browser and nothing is uploaded. The copy says it's a sty
    - `render(size)` with scheduling, download, debug params
 4. Add an entry to the Projects list in `index.html`.
 5. Test with photos, tune the constants, show results. Commit only when asked.
+
+---
+
+# Update: anime eye template
+
+The first version painted anime parts inside the *real* eye outline. Real eyes are narrow almond shapes, so the result looked uncanny. Two fixes:
+
+**The real eye is no longer used as the outline.** The real eye and lids are covered with sampled cheek skin. A fixed anime eye template is drawn in their place, sized from the distance between the eyes: width 0.55–0.72 of that distance, and height 0.62–0.87 of the eye's width, both set by the eye size slider. Each eye is positioned at the real eye center, tilted along the eye line, and mirrored for the left eye.
+
+The template:
+- a high arched upper lid and a shallow lower lid
+- a lash band that thickens toward the outer corner and ends in a wing and a spike
+- a lower-lash line and two tick lashes on the outer part, plus a faint crease
+- a tall iris tucked under the lid with:
+  - a deep → base → light gradient, a lower glow and fine streaks
+  - a pupil, a lid shadow and a rim
+  - three highlights, lit from the same side on both eyes
+- the real gaze kept as a small iris offset; closed eyes become a "happy" arc
+
+**Eye picture datasets / training.** I looked for anime eye picture sets and decided against them:
+- The eye-specific sets (Roboflow "anime_eye", CC BY 4.0) are small detection sets.
+- The big anime face sets (Danbooru crops, Getchu faces) are scraped fan and commercial art. Their dataset licenses don't cover the artwork itself. One was taken down over copyright.
+- `huggan/anime-faces` is labeled CC0, but it's the same kind of scraped art.
+- Training a generator on these would copy specific artists' work and add a large model download.
+
+Instead, the template follows common anime eye construction (lid shape, lash weight, iris layering, highlights) and doesn't copy any image.

@@ -874,6 +874,23 @@
 
     // ---------- eyes + blush ----------
 
+    // Anime eye template, in units of eye width W (x: -0.5 inner corner … +0.5 outer corner, y down).
+    // Drawn from common anime eye construction: a high arched upper lid with a heavy lash band that flares
+    // into a wing at the outer corner, a shallow lower lid, a tall iris tucked under the lid, a lid shadow,
+    // a glowing lower iris, and highlights that share one light direction across both eyes.
+    function eyeTemplate(H) {
+      const P0 = [-0.5, 0.1 * H], P3 = [0.5, -0.06 * H];
+      return {
+        P0, P3,
+        upper: [P0, [-0.36, -0.78 * H], [0.3, -0.8 * H], P3],
+        lower: [P3, [0.42, 0.5 * H], [-0.22, 0.6 * H], P0],
+      };
+    }
+    const bez = (c, t) => {
+      const u = 1 - t;
+      return [0, 1].map((i) => u * u * u * c[0][i] + 3 * u * u * t * c[1][i] + 3 * u * t * t * c[2][i] + t * t * t * c[3][i]);
+    };
+
     function eyeGeom(pts, E) {
       const up = E.upper.map((i) => pts[i]), lo = E.lower.map((i) => pts[i]);
       const outer = up[0], inner = up[up.length - 1];
@@ -882,42 +899,59 @@
       return { up, lo, outer, inner, w, h };
     }
 
-    function eyePath(ctx, g) {
-      ctx.beginPath();
-      g.up.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-      for (let i = g.lo.length - 2; i > 0; i--) ctx.lineTo(g.lo[i].x, g.lo[i].y);
-      ctx.closePath();
-    }
-
-    function drawEyes(ctx, pts, color, d) {
+    function drawEyes(ctx, pts, color, d, eyeAmt) {
       const base = hexToRgb(color);
-      const dark = mixRgb(base, [10, 5, 15], 0.7), light = mixRgb(base, [255, 255, 255], 0.45);
-      const lash = '#2a1a1e';
-      // Stretched real lids and sockets read as dark smudges around drawn eyes, so paint skin over them first.
+      const dark = mixRgb(base, [12, 6, 20], 0.72), deep = mixRgb(base, [0, 0, 0], 0.82);
+      const light = mixRgb(base, [255, 255, 255], 0.5), glow = mixRgb(base, [255, 250, 210], 0.3);
+      const lash = '#1d1216';
+      const W = d * (0.55 + 0.17 * eyeAmt);
+      const H = W * (0.62 + 0.25 * eyeAmt);
+
       const sample = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height).data;
       const kk = ctx.canvas.width / SIZE;
-      const skinAt = (x, y) => {
+      const lumaAt = (x, y) => {
         const j = (Math.round(y * kk) * ctx.canvas.width + Math.round(x * kk)) * 4;
         return [sample[j], sample[j + 1], sample[j + 2]];
       };
-      EYES.forEach((E) => {
+      // Skin color for covering the real eye: the lighter of two cheek samples (avoids shadow bands).
+      const skinBelow = (c) => {
+        const a = lumaAt(c.x, c.y + d * 0.42), b = lumaAt(c.x, c.y + d * 0.55);
+        const L = (v) => v[0] * 0.3 + v[1] * 0.59 + v[2] * 0.11;
+        return L(a) > L(b) ? a : b;
+      };
+
+      const eyes = EYES.map((E) => {
         const g = eyeGeom(pts, E);
         const c = { x: (g.outer.x + g.inner.x) / 2, y: (g.outer.y + g.inner.y) / 2 };
-        const skin = skinAt(c.x, c.y + d * 0.42);
+        // Image-left corner to image-right corner sets the tilt; the left eye is mirrored so x points outward.
+        const [lc, rc] = g.outer.x < g.inner.x ? [g.outer, g.inner] : [g.inner, g.outer];
+        const ang = Math.atan2(rc.y - lc.y, rc.x - lc.x);
+        const sx = g.outer.x > g.inner.x ? 1 : -1;
+        // Keep the real gaze: iris offset along the eye, as a fraction of the real eye width.
+        let ic = pts[IRIS[0]];
+        for (const ci of IRIS) if (Math.hypot(pts[ci].x - c.x, pts[ci].y - c.y) < Math.hypot(ic.x - c.x, ic.y - c.y)) ic = pts[ci];
+        const along = ((ic.x - c.x) * Math.cos(ang) + (ic.y - c.y) * Math.sin(ang)) * sx / g.w;
+        return { g, c, ang, sx, gaze: Math.max(-0.12, Math.min(0.12, along * 0.8)), open: g.h / g.w > 0.14, skin: skinBelow(c) };
+      });
+
+      // 1. Cover the real (stretched) eyes and lids with skin.
+      for (const e of eyes) {
         ctx.save();
-        ctx.translate(c.x, c.y - g.h * 0.15);
-        ctx.scale(1, 0.75);
-        const r = g.w * 0.95;
-        const gr = ctx.createRadialGradient(0, 0, r * 0.45, 0, 0, r);
-        gr.addColorStop(0, rgbStr(skin, 0.85));
-        gr.addColorStop(1, rgbStr(skin, 0));
+        ctx.translate(e.c.x, e.c.y - H * 0.1);
+        ctx.rotate(e.ang);
+        ctx.scale(1, (H * 0.95 + W * 0.12) / (W * 0.78));
+        const r = W * 0.78;
+        const gr = ctx.createRadialGradient(0, 0, r * 0.62, 0, 0, r);
+        gr.addColorStop(0, rgbStr(e.skin, 1));
+        gr.addColorStop(1, rgbStr(e.skin, 0));
         ctx.fillStyle = gr;
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-      });
-      // The skin patch fades real brows, so redraw thin anime brows on the brow landmarks (outer to inner).
+      }
+
+      // 2. Brows: thin strokes on the brow landmarks, drawn over the skin patch.
       ctx.strokeStyle = 'rgba(58,36,38,0.85)';
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -927,94 +961,169 @@
         ids.forEach((i, j) => (j ? ctx.lineTo(pts[i].x, pts[i].y) : ctx.moveTo(pts[i].x, pts[i].y)));
         ctx.stroke();
       }
-      EYES.forEach((E, idx) => {
-        const g = eyeGeom(pts, E);
-        const open = g.h / g.w > 0.14;
-        if (open) {
-          // Iris: whichever iris landmark sits closer to this eye.
-          const em = { x: (g.outer.x + g.inner.x) / 2, y: (g.outer.y + g.inner.y) / 2 };
-          let ic = pts[IRIS[0]];
-          for (const ci of IRIS) if (Math.hypot(pts[ci].x - em.x, pts[ci].y - em.y) < Math.hypot(ic.x - em.x, ic.y - em.y)) ic = pts[ci];
-          const rx = g.w * 0.3, ry = Math.max(rx * 1.25, g.h * 0.62);
-          const cx = ic.x, cy = ic.y - ry * 0.04;
 
-          ctx.save();
-          eyePath(ctx, g);
-          ctx.clip();
-          ctx.fillStyle = '#fbf8f5';
-          ctx.fill();
-          // Iris gradient, dark at the top.
-          let gr = ctx.createLinearGradient(0, cy - ry, 0, cy + ry);
-          gr.addColorStop(0, rgbStr(dark));
-          gr.addColorStop(0.45, rgbStr(base));
-          gr.addColorStop(1, rgbStr(light));
-          ctx.fillStyle = gr;
+      // 3. The eyes.
+      for (const e of eyes) {
+        ctx.save();
+        ctx.translate(e.c.x, e.c.y);
+        ctx.rotate(e.ang);
+        ctx.scale(W * e.sx, W);
+        const lw = (px) => px / W; // pixel widths in template units
+        const T = eyeTemplate(H / W);
+        const h = H / W;
+
+        if (!e.open) {
+          // Closed / smiling eye: a happy arc with a small flick.
+          ctx.strokeStyle = lash;
+          ctx.lineCap = 'round';
+          ctx.lineWidth = 0.07;
           ctx.beginPath();
-          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.lineWidth = Math.max(1, d * 0.012);
-          ctx.strokeStyle = rgbStr(mixRgb(dark, [0, 0, 0], 0.4));
+          ctx.moveTo(-0.45, 0.12 * h);
+          ctx.bezierCurveTo(-0.2, -0.38 * h, 0.22, -0.38 * h, 0.48, 0.06 * h);
+          ctx.lineTo(0.6, -0.06 * h);
           ctx.stroke();
-          // Pupil.
-          ctx.fillStyle = rgbStr(mixRgb(dark, [0, 0, 0], 0.55));
-          ctx.beginPath();
-          ctx.ellipse(cx, cy - ry * 0.05, rx * 0.42, ry * 0.5, 0, 0, Math.PI * 2);
-          ctx.fill();
-          // Light ring low in the iris.
-          ctx.strokeStyle = rgbStr(light, 0.55);
-          ctx.lineWidth = rx * 0.12;
-          ctx.beginPath();
-          ctx.ellipse(cx, cy, rx * 0.72, ry * 0.72, 0, Math.PI * 0.2, Math.PI * 0.8);
-          ctx.stroke();
-          // Upper lid shadow.
-          const top = Math.min(...g.up.map((p) => p.y));
-          gr = ctx.createLinearGradient(0, top, 0, top + g.h * 0.55);
-          gr.addColorStop(0, 'rgba(40,20,40,0.45)');
-          gr.addColorStop(1, 'rgba(40,20,40,0)');
-          ctx.fillStyle = gr;
-          ctx.fillRect(g.outer.x - g.w, top, g.w * 3, g.h);
-          // Highlights.
-          ctx.fillStyle = 'rgba(255,255,255,0.95)';
-          ctx.beginPath();
-          ctx.ellipse(cx - rx * 0.32 * -E.dir, cy - ry * 0.38, rx * 0.3, ry * 0.24, -0.4 * E.dir, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.beginPath();
-          ctx.arc(cx + rx * 0.35 * -E.dir, cy + ry * 0.38, rx * 0.12, 0, Math.PI * 2);
-          ctx.fill();
           ctx.restore();
+          continue;
         }
 
-        // Upper lash: a filled band along the lid, thickest at the outer corner, with a flick.
-        const n = g.up.length;
-        const thick = (t) => d * (open ? 0.05 : 0.03) * (1 - 0.65 * t);
+        const opening = () => {
+          ctx.beginPath();
+          ctx.moveTo(...T.upper[0]);
+          ctx.bezierCurveTo(...T.upper[1], ...T.upper[2], ...T.upper[3]);
+          ctx.bezierCurveTo(...T.lower[1], ...T.lower[2], ...T.lower[3]);
+          ctx.closePath();
+        };
+
+        ctx.save();
+        opening();
+        ctx.clip();
+        // Sclera with a cool shadow under the upper lid.
+        ctx.fillStyle = '#fdfbfa';
+        ctx.fillRect(-1, -1, 2, 2);
+        let gr = ctx.createLinearGradient(0, -0.6 * h, 0, 0.15 * h);
+        gr.addColorStop(0, 'rgba(105,95,150,0.55)');
+        gr.addColorStop(1, 'rgba(105,95,150,0)');
+        ctx.fillStyle = gr;
+        ctx.fillRect(-1, -1, 2, 2);
+
+        // Iris: tall, tucked under the lid, touching the lower lid.
+        const ry = 0.62 * h, rx = Math.min(0.36, ry / 1.25);
+        const ix = -0.03 + e.gaze, iy = 0.02 * h;
+        const irisPath = () => { ctx.beginPath(); ctx.ellipse(ix, iy, rx, ry, 0, 0, Math.PI * 2); };
+        ctx.save();
+        irisPath();
+        ctx.clip();
+        gr = ctx.createLinearGradient(0, iy - ry, 0, iy + ry);
+        gr.addColorStop(0, rgbStr(deep));
+        gr.addColorStop(0.35, rgbStr(dark));
+        gr.addColorStop(0.7, rgbStr(base));
+        gr.addColorStop(1, rgbStr(light));
+        ctx.fillStyle = gr;
+        ctx.fillRect(-1, -1, 2, 2);
+        // Glow in the lower half.
+        gr = ctx.createRadialGradient(ix, iy + ry * 0.55, 0, ix, iy + ry * 0.55, rx * 1.05);
+        gr.addColorStop(0, rgbStr(glow, 0.85));
+        gr.addColorStop(1, rgbStr(glow, 0));
+        ctx.fillStyle = gr;
+        ctx.fillRect(-1, -1, 2, 2);
+        // Fine streaks out from the pupil.
+        ctx.strokeStyle = rgbStr(dark, 0.35);
+        ctx.lineWidth = lw(Math.max(0.6, W * 0.008));
+        ctx.beginPath();
+        for (let i = 0; i < 14; i++) {
+          const a = (i / 14) * Math.PI * 2;
+          ctx.moveTo(ix + Math.cos(a) * rx * 0.45, iy + Math.sin(a) * ry * 0.45);
+          ctx.lineTo(ix + Math.cos(a) * rx * 0.9, iy + Math.sin(a) * ry * 0.9);
+        }
+        ctx.stroke();
+        // Pupil.
+        ctx.fillStyle = rgbStr(deep);
+        ctx.beginPath();
+        ctx.ellipse(ix, iy - ry * 0.06, rx * 0.4, ry * 0.46, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Lid shadow across the top of the iris.
+        gr = ctx.createLinearGradient(0, iy - ry, 0, iy - ry * 0.05);
+        gr.addColorStop(0, rgbStr(deep, 0.75));
+        gr.addColorStop(1, rgbStr(deep, 0));
+        ctx.fillStyle = gr;
+        ctx.fillRect(-1, -1, 2, 2);
+        ctx.restore();
+        // Rim.
+        irisPath();
+        ctx.strokeStyle = rgbStr(deep, 0.9);
+        ctx.lineWidth = 0.035;
+        ctx.stroke();
+
+        // Highlights, lit from the image's upper left on both eyes.
+        const hx = -e.sx; // template x that points to image-left
+        ctx.fillStyle = 'rgba(255,255,255,0.97)';
+        ctx.beginPath();
+        ctx.ellipse(ix + hx * rx * 0.3, iy - ry * 0.4, rx * 0.36, ry * 0.25, -0.35 * hx, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(ix - hx * rx * 0.38, iy + ry * 0.42, rx * 0.13, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.beginPath();
+        ctx.arc(ix + hx * rx * 0.62, iy - ry * 0.05, rx * 0.07, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Upper lash band: thin at the inner corner, heavy at the outer, ending in a wing.
+        const N = 24, bottom = [], top = [];
+        for (let i = 0; i <= N; i++) {
+          const t = i / N, p = bez(T.upper, t);
+          const p2 = bez(T.upper, Math.min(1, t + 0.01)), p1 = bez(T.upper, Math.max(0, t - 0.01));
+          let nx = p2[1] - p1[1], ny = -(p2[0] - p1[0]);
+          const len = Math.hypot(nx, ny) || 1;
+          nx /= len; ny /= len;
+          if (ny > 0) { nx = -nx; ny = -ny; }
+          const th = 0.04 + 0.13 * Math.pow(t, 1.3);
+          bottom.push([p[0] - nx * 0.012, p[1] - ny * 0.012]);
+          top.push([p[0] + nx * th, p[1] + ny * th]);
+        }
         ctx.fillStyle = lash;
         ctx.beginPath();
-        g.up.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y + d * 0.005) : ctx.moveTo(p.x, p.y + d * 0.005)));
-        for (let i = n - 1; i >= 0; i--) ctx.lineTo(g.up[i].x, g.up[i].y - thick(i / (n - 1)));
-        ctx.lineTo(g.outer.x + E.dir * d * 0.13, g.outer.y - d * 0.09);
+        bottom.forEach((p, i) => (i ? ctx.lineTo(...p) : ctx.moveTo(...p)));
+        ctx.lineTo(0.74, -0.36 * h - 0.04);  // wing tip
+        ctx.lineTo(0.58, -0.3 * h - 0.02);
+        ctx.lineTo(0.66, -0.56 * h - 0.07);  // second spike
+        for (let i = top.length - 1; i >= 0; i--) ctx.lineTo(...top[i]);
         ctx.closePath();
         ctx.fill();
-        ctx.lineCap = 'round';
+
+        // Lower lid: short line on the outer part plus two tiny lashes.
         ctx.strokeStyle = lash;
-        if (open) {
-          // Lower line on the outer half.
-          ctx.globalAlpha = 0.7;
-          ctx.lineWidth = Math.max(1, d * 0.014);
-          ctx.beginPath();
-          g.lo.slice(0, 5).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x + E.dir * d * 0.02, p.y)));
-          ctx.stroke();
-          // Lid crease.
-          ctx.globalAlpha = 0.4;
-          ctx.lineWidth = Math.max(1, d * 0.01);
-          ctx.beginPath();
-          g.up.slice(1, n - 2).forEach((p, i) => {
-            const y = p.y - g.h * 0.45 - d * 0.03;
-            i ? ctx.lineTo(p.x, y) : ctx.moveTo(p.x, y);
-          });
-          ctx.stroke();
-          ctx.globalAlpha = 1;
+        ctx.lineCap = 'round';
+        ctx.lineWidth = 0.022;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        for (let i = 0; i <= 10; i++) {
+          const p = bez(T.lower, i / 10 * 0.42);
+          i ? ctx.lineTo(...p) : ctx.moveTo(...p);
         }
-      });
+        ctx.stroke();
+        ctx.lineWidth = 0.016;
+        ctx.beginPath();
+        for (const t of [0.12, 0.26]) {
+          const p = bez(T.lower, t);
+          ctx.moveTo(...p);
+          ctx.lineTo(p[0] + 0.03, p[1] + 0.07 * h + 0.02);
+        }
+        ctx.stroke();
+        // Crease above the lid.
+        ctx.globalAlpha = 0.35;
+        ctx.lineWidth = 0.018;
+        ctx.beginPath();
+        for (let i = 0; i <= 10; i++) {
+          const t = 0.4 + 0.45 * (i / 10), p = bez(T.upper, t);
+          const q = [p[0] + 0.02, p[1] - 0.2 * h - 0.06];
+          i ? ctx.lineTo(...q) : ctx.moveTo(...q);
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.restore();
+      }
     }
 
     function drawBlush(ctx, pts, d) {
@@ -1096,7 +1205,7 @@
       const A = faceAnchors(target);
       outCtx.setTransform(k, 0, 0, k, 0, 0);
       if (s.blush) drawBlush(outCtx, target, A.d);
-      if (s.eyes) drawEyes(outCtx, target, s.eyeColor, A.d);
+      if (s.eyes) drawEyes(outCtx, target, s.eyeColor, A.d, s.eye);
       outCtx.setTransform(1, 0, 0, 1, 0, 0);
       lastMs = performance.now() - t0;
     }
