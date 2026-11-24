@@ -92,3 +92,91 @@ Moving the slider re-runs steps 5–9 only. Detection runs once per image. Canva
 
 - **Blur.** Averaging many faces softens features: hair, glasses and backgrounds wash out. That is the classic "average face" look, and the fade-background option hides most of it.
 - **Bad photos.** One sharply angled face drags the average shape. Lowering that face's weight is the fix.
+
+---
+
+# Update: baby & aging
+
+A new panel under the merged result. It turns the current merge (2–10 faces, using the same weights and "shape from" setting) into a "baby" and adds an **age** slider running baby → toddler → teen → adult → grandparent.
+
+## Decisions
+
+| Question | Decision | Why |
+| --- | --- | --- |
+| How to age a face | Procedural, in the browser. Reshape the landmark geometry, then re-warp the photos and adjust the texture. | AI age models (diffusion or GAN) need a GPU backend, cost money and upload photos, which breaks the page's privacy promise. A procedural version is honest about being a playful guess. |
+| Source face | The current merged result | "Baby of these people" is literally their blend, so weights and "shape from" carry over. |
+| Adult stage | The unchanged merge | Gives the slider a neutral anchor point. |
+| Slider | 0–400, with five evenly spaced stops; values in between interpolate | Smooth growing-up animation while dragging. |
+
+## Age model
+
+Five keyframes (baby, toddler, teen, adult, grandparent). Each holds geometry and texture parameters, and values between keyframes are linearly interpolated.
+
+**Geometry** is applied to the target landmarks. Frame points stay fixed, and the existing triangle warp moves the pixels.
+
+- Lower face: shorter for kids. Points below the eye line move toward it (baby ×0.72).
+- Jaw: narrower toward the chin for kids, slightly wider for old age.
+- Eyes, nose and mouth: local scaling with a Gaussian falloff, so the surrounding skin bends smoothly.
+  - eyes bigger for kids (baby ×1.22) and slightly smaller for old age
+  - nose smaller for kids (×0.7) and longer for old age
+  - mouth smaller for kids; lips thinner for old age (vertical ×0.72)
+- Forehead: taller for kids.
+- Old age only: jowls (jaw line sags and widens away from the chin) and lowered brows.
+
+**Texture** works in all browsers. Canvas `filter` isn't available in older Safari, so blur is done by downscaling then upscaling, and tints use blend modes.
+
+- Kids:
+  - smoother skin: a blurred layer is blended over the face, leaving eyes, nose and mouth sharp
+  - a warm, pinker tone (soft-light)
+- Grandparent:
+  - procedural wrinkles drawn from landmark positions: forehead lines, crow's feet, under-eye bags, nasolabial folds and marionette lines, each as a multiply stroke plus a light highlight
+  - less saturated skin
+  - gray hair: everything outside the face oval is desaturated and lightened
+
+## Risks
+
+- It's stylized, not a real prediction, and the copy says so.
+- The geometry changes assume a roughly frontal merge, which alignment already pushes toward.
+- With "fade background" off, kid proportions can look odd because the hair and head outline don't shrink. Keeping the fade on hides it.
+
+---
+
+# Update: seamless merging
+
+## Kinks seen in testing
+
+1. **Lighting and color mismatch.** A face lit from one side, or shot against a white wall, leaves blotchy patches and color halos in the blend.
+2. **Hair and background ghosting.** Outside the face, only 16 fixed frame points line up between photos. Hair, ears and neck from different photos land in different places and show through as faint outlines.
+3. **Softness.** Averaging N slightly misaligned photos blurs fine detail. It gets worse as more faces are added.
+4. **Pose and expression.** A turned head or an open mouth can't be fixed by a 2D warp, and it ghosts.
+5. **Small faces.** A face that is only a few dozen pixels wide in its photo gets upscaled and turns mushy.
+
+## Fixes
+
+| Kink | Fix |
+| --- | --- |
+| 1 | **Lighting match** (on by default, under "seamless blend"). Each warped face is split into low frequencies (a 1/16-scale blur) and detail. Its low frequencies are replaced with the weighted average of everyone's: `faceᵢ × avgLow / lowᵢ`, with the ratio clamped to [0.4, 2.5]. Every face then shares the same shading and color, so only detail differs and the blend has no blotches. A single face at 100% weight is unchanged. |
+| 2 | **Outer ring points.** The 36 face-outline points are copied outward from the face center (×1.35, kept inside the frame). This gives hair, ears and neck rough correspondence, so they warp together instead of sliding. |
+| 3 | **Light sharpening.** After blending: `result + 0.35 × (result − blur3×3)`. Also under "seamless blend". |
+| 4, 5 | **Per-photo warnings on the card** (soft, not errors): "head turned" (nose offset > 0.22 × eye distance), "mouth open" (lip gap > 0.12 × eye distance) and "small face" (eye distance < 45 px in the source). Users can lower that face's weight or swap the photo. |
+
+## Testing data
+
+MediaPipe's landmark model is pre-trained, so the page doesn't train anything. Public face sets are useful as fixed test inputs, to check lighting, pose and age variety without relying on the user's own photos. Candidates and their licenses are in the testing section of the plan doc. Test photos stay in the git-ignored `.face-test/`, never in the repo.
+
+## Test results: Face Research Lab London Set
+
+Downloaded the CC BY 4.0 London Set (front neutral, front smiling and left 3/4 views) into the git-ignored `.face-test/frll/`. Nothing from it is committed or published.
+
+- **Detection:**
+  - front neutral: 102/102, no warnings
+  - left 3/4: 102/102, all flagged "head turned"
+  - front smiling: 102/102, 33 flagged "mouth open" (teeth)
+- **Head turn:** measured as nose offset ÷ eye distance. Front-facing photos measured ≤ 0.05 and 3/4 views ≥ 0.42.
+  - **Kink found:** merging a 3/4 view with front views tears the triangles (folded triangles, shards along the nose and jaw).
+  - **Fix:** faces turned more than 0.35 start at weight 0, and the card says "left out — raise its weight to include".
+- **Aging:**
+  - **Kink found:** the grandparent gray-hair mask grayed the top of the forehead. MediaPipe's top outline point (10) sits mid-forehead, not at the hairline. **Fix:** the protected skin ellipse now extends about 15% higher.
+  - **Kink found:** babies kept dark adult brows and stubble. **Fix:** brows are no longer protected from the skin smoothing, and the eye and mouth protection is smaller.
+- **Seamless blend:** in studio-lit photos the gain is small (slightly sharper). On mixed real-world photos it removes background color halos and patchy lighting.
+- **Speed:** 10 faces take about 210 ms to redraw both canvases at 512 px.

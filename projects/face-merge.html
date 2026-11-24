@@ -133,8 +133,14 @@
     align-items: center;
     justify-content: center;
   }
-  #result { width: 100%; height: 100%; display: none; }
-  .result-canvas-box.ready #result { display: block; }
+  .result-canvas-box canvas { width: 100%; height: 100%; display: none; }
+  .result-canvas-box.ready canvas { display: block; }
+  .age-ticks {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.6rem;
+    letter-spacing: 0.02em;
+  }
   .result-canvas-box.ready .result-empty { display: none; }
   .result-empty {
     font-family: var(--font-mono);
@@ -282,6 +288,7 @@
             shape from
             <select id="shapeFrom"><option value="blend">blend (weighted average)</option></select>
           </label>
+          <label class="check"><input type="checkbox" id="seamless" checked /> seamless blend</label>
           <label class="check"><input type="checkbox" id="showMesh" /> show mesh</label>
           <label class="check"><input type="checkbox" id="crop" checked /> fade background</label>
           <div class="btn-row">
@@ -289,6 +296,27 @@
             <button class="fm-btn" id="downloadBtn" disabled>download png</button>
           </div>
           <p class="control-note">each face's slider sets how much of it goes into the merge.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="fm-panel">
+      <p class="panel-title"><span>baby &amp; aging</span></p>
+      <div class="result-wrap">
+        <div class="result-canvas-box" id="ageBox">
+          <canvas id="ageResult" width="512" height="512"></canvas>
+          <span class="result-empty">add at least two faces to make a baby</span>
+        </div>
+        <div class="controls">
+          <label class="control">
+            <span class="control-row">age <output id="ageOut">baby</output></span>
+            <input type="range" id="age" min="0" max="400" value="0" />
+            <span class="age-ticks"><span>baby</span><span>toddler</span><span>teen</span><span>adult</span><span>grandparent</span></span>
+          </label>
+          <div class="btn-row">
+            <button class="fm-btn" id="ageDownloadBtn" disabled>download png</button>
+          </div>
+          <p class="control-note">the baby is the merged face above with child proportions: bigger eyes, smaller nose and jaw, softer skin. slide right to grow it up, then age it with wrinkles and gray hair. a playful guess, not a real prediction.</p>
         </div>
       </div>
     </div>
@@ -310,6 +338,10 @@
       <div class="how-step">
         <p class="how-name">4. warp + blend</p>
         <p class="how-desc">Every triangle in each photo gets its own affine transform onto the matching target triangle. The warped photos are then averaged using each face's weight. <em>Shape from</em> can lock the geometry to one face, so everyone's skin goes onto that one face's shape.</p>
+      </div>
+      <div class="how-step">
+        <p class="how-name">5. baby &amp; aging</p>
+        <p class="how-desc">The merged shape is pushed toward each age's proportions. Kids get a shorter lower face, bigger eyes, and a smaller nose and jaw. Old age gets jowls, thinner lips and lower brows. The photos are re-warped onto that shape. Then texture passes add soft baby skin, or wrinkles and gray hair drawn from the landmark positions.</p>
       </div>
     </div>
   </div>
@@ -383,10 +415,13 @@
     const addInput = addTile.querySelector('input');
     const resultBox = $('resultBox');
     const out = $('result');
-    const outCtx = out.getContext('2d');
+    const outCtx = out.getContext('2d', { willReadFrequently: true });
     const shapeFromEl = $('shapeFrom');
-    const meshEl = $('showMesh'), cropEl = $('crop');
+    const meshEl = $('showMesh'), cropEl = $('crop'), seamlessEl = $('seamless');
     const equalBtn = $('equalBtn'), downloadBtn = $('downloadBtn');
+    const ageBox = $('ageBox'), ageCanvas = $('ageResult'), ageSlider = $('age'), ageOut = $('ageOut');
+    const ageDownloadBtn = $('ageDownloadBtn');
+    ageCanvas.getContext('2d', { willReadFrequently: true });
 
     // Each entry: { id, card, status, slider, weight, face: { aligned, pts } | null, busy }
     let entries = [];
@@ -544,7 +579,14 @@
         const raw = best.map((p) => ({ x: p.x * src.width, y: p.y * src.height }));
         entry.face = alignFace(src, raw);
         drawThumb(entry);
-        setStatus(entry, all.length > 1 ? `${all.length} faces — using the largest` : 'face found');
+        const notes = [all.length > 1 ? `${all.length} faces — using the largest` : 'face found', ...entry.face.warnings];
+        // A strongly turned head tears when warped flat, so it starts out of the merge.
+        if (entry.face.yaw > 0.35) {
+          setWeight(entry, 0, false);
+          notes.push('left out — raise its weight to include');
+        }
+        setStatus(entry, notes.join(' · '));
+        entry.status.title = entry.face.warnings.length ? 'these can ghost in the merge — try a front-facing, neutral photo or lower its weight' : '';
         triangles = null;
       } catch (err) {
         console.error(err);
@@ -592,7 +634,23 @@
       const e = SIZE - 1, h = SIZE / 2, k = SIZE / 4;
       for (const [x, y] of [[0, 0], [k, 0], [h, 0], [e - k, 0], [e, 0], [e, k], [e, h], [e, e - k], [e, e],
         [e - k, e], [h, e], [k, e], [0, e], [0, e - k], [0, h], [0, k]]) pts.push({ x, y });
-      return { aligned, pts };
+      // Outer ring: the face outline pushed outward, so hair, ears and neck roughly line up across photos.
+      const oc = avgPt(pts, FACE_OVAL);
+      const clamp = (v) => Math.min(SIZE - 3, Math.max(2, v));
+      for (const i of FACE_OVAL) {
+        pts.push({ x: clamp(oc.x + (pts[i].x - oc.x) * 1.35), y: clamp(oc.y + (pts[i].y - oc.y) * 1.35) });
+      }
+
+      // Soft warnings for things a 2D warp can't fix.
+      const d = EYE_R.x - EYE_L.x;
+      const warnings = [];
+      // Nose offset from the eye midpoint, in eye-distances: front-facing photos measure under ~0.05,
+      // 3/4 views over ~0.4 (Face Research Lab London Set).
+      const yaw = Math.abs(pts[1].x - (EYE_L.x + EYE_R.x) / 2) / d;
+      if (yaw > 0.22) warnings.push('head turned');
+      if (Math.abs(pts[14].y - pts[13].y) > 0.12 * d) warnings.push('mouth open');
+      if (Math.hypot(dx, dy) < 45) warnings.push('small face');
+      return { aligned, pts, warnings, yaw };
     }
 
     function drawThumb(entry) {
@@ -611,7 +669,10 @@
 
     const bufPool = [];
     function buffer(i, size) {
-      if (!bufPool[i]) bufPool[i] = document.createElement('canvas');
+      if (!bufPool[i]) {
+        bufPool[i] = document.createElement('canvas');
+        bufPool[i].getContext('2d', { willReadFrequently: true });
+      }
       const c = bufPool[i];
       if (c.width !== size) c.width = c.height = size;
       return c;
@@ -675,9 +736,10 @@
       return res;
     }
 
-    function render(size) {
+    // Ready faces, normalized weights and the target shape for the merge; null with fewer than two faces.
+    function mergeState() {
       const list = readyEntries();
-      if (list.length < 2) return;
+      if (list.length < 2) return null;
       let ws = list.map((e) => e.weight);
       let total = ws.reduce((s, w) => s + w, 0);
       if (total === 0) { ws = ws.map(() => 1); total = ws.length; }
@@ -691,48 +753,407 @@
 
       const shapeSrc = list.find((e) => String(e.id) === shapeFromEl.value);
       const target = shapeSrc ? shapeSrc.face.pts : weightedPts(list, ws);
-      const k = size / SIZE;
-
-      if (out.width !== size) out.width = out.height = size;
-      outCtx.setTransform(1, 0, 0, 1, 0, 0);
-      outCtx.globalCompositeOperation = 'source-over';
-      outCtx.clearRect(0, 0, size, size);
-      // Running weighted average: face i is drawn at alpha w_i / (w_1 + … + w_i).
-      let cum = 0;
-      list.forEach((entry, i) => {
-        if (ws[i] <= 0) return;
-        cum += ws[i];
-        const buf = buffer(i, size);
-        warpInto(buf, entry.face.aligned, entry.face.pts, target, triangles, k);
-        outCtx.globalAlpha = ws[i] / cum;
-        outCtx.drawImage(buf, 0, 0);
-      });
-      outCtx.globalAlpha = 1;
-
-      outCtx.setTransform(k, 0, 0, k, 0, 0);
-      if (cropEl.checked) featherFace(target);
-      if (meshEl.checked) drawMesh(target, k);
-      outCtx.setTransform(1, 0, 0, 1, 0, 0);
+      return { list, ws, target };
     }
 
-    function featherFace(pts) {
+    // Warp every face onto `target` and draw their weighted average into `canvas`.
+    function composite(canvas, size, st, target) {
+      const ctx = canvas.getContext('2d');
+      const k = size / SIZE;
+      if (canvas.width !== size) canvas.width = canvas.height = size;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+      ctx.clearRect(0, 0, size, size);
+      const active = [];
+      st.list.forEach((entry, i) => {
+        if (st.ws[i] <= 0) return;
+        warpInto(buffer(i, size), entry.face.aligned, entry.face.pts, target, triangles, k);
+        active.push(i);
+      });
+      if (seamlessEl.checked && active.length > 1) {
+        blendEven(ctx, size, active, st.ws);
+      } else {
+        // Running weighted average: face i is drawn at alpha w_i / (w_1 + … + w_i).
+        let cum = 0;
+        for (const i of active) {
+          cum += st.ws[i];
+          ctx.globalAlpha = st.ws[i] / cum;
+          ctx.drawImage(bufPool[i], 0, 0);
+        }
+        ctx.globalAlpha = 1;
+      }
+      if (seamlessEl.checked) sharpen(ctx, size, 0.35);
+      return ctx;
+    }
+
+    // ---------- seamless blend ----------
+
+    const lowCanvas = document.createElement('canvas');
+    const lowCtx = lowCanvas.getContext('2d', { willReadFrequently: true });
+    const upCanvas = document.createElement('canvas');
+    const upCtx = upCanvas.getContext('2d', { willReadFrequently: true });
+
+    // Low frequencies of a canvas: shrink to L×L, then scale smoothly back up.
+    function lowPass(src, size, L) {
+      lowCanvas.width = lowCanvas.height = L;
+      lowCtx.imageSmoothingQuality = 'high';
+      lowCtx.drawImage(src, 0, 0, L, L);
+      upCanvas.width = upCanvas.height = size;
+      upCtx.imageSmoothingQuality = 'high';
+      upCtx.drawImage(lowCanvas, 0, 0, size, size);
+      return upCtx.getImageData(0, 0, size, size).data;
+    }
+
+    // Weighted average where each face is first matched to the group: one color gain per face (from the
+    // central face area) fixes overall tint, then a local brightness ratio (avgLow / ownLow, on luma only so
+    // it can't shift hue) evens out shading. Only detail then differs, so nothing blotchy shows through.
+    function blendEven(ctx, size, active, ws) {
+      const L = Math.max(8, Math.round(size / 16));
+      const n = size * size * 4;
+      const pix = [], lumas = [], gains = [];
+      let wsum = 0;
+      const mean = [0, 0, 0];
+      const means = [];
+      const x0 = Math.round(size * 0.3), x1 = Math.round(size * 0.7), y0 = Math.round(size * 0.35), y1 = Math.round(size * 0.75);
+      for (const i of active) {
+        const px = bufPool[i].getContext('2d').getImageData(0, 0, size, size).data;
+        pix.push(px);
+        const m = [0, 0, 0];
+        let cnt = 0;
+        for (let y = y0; y < y1; y += 2) {
+          for (let x = x0; x < x1; x += 2) {
+            const j = (y * size + x) * 4;
+            m[0] += px[j]; m[1] += px[j + 1]; m[2] += px[j + 2]; cnt++;
+          }
+        }
+        for (let c = 0; c < 3; c++) { m[c] /= cnt; mean[c] += m[c] * ws[i]; }
+        means.push(m);
+        wsum += ws[i];
+      }
+      for (let c = 0; c < 3; c++) mean[c] /= wsum;
+
+      const px4 = size * size;
+      const avgLuma = new Float32Array(px4);
+      active.forEach((i, a) => {
+        const g = means[a].map((m, c) => Math.min(1.4, Math.max(0.7, mean[c] / Math.max(m, 1))));
+        gains.push(g);
+        const low = lowPass(bufPool[i], size, L);
+        const luma = new Float32Array(px4);
+        for (let p = 0, j = 0; p < px4; p++, j += 4) {
+          luma[p] = 0.299 * low[j] * g[0] + 0.587 * low[j + 1] * g[1] + 0.114 * low[j + 2] * g[2];
+          avgLuma[p] += luma[p] * ws[i] / wsum;
+        }
+        lumas.push(luma);
+      });
+
+      const acc = new Float32Array(n);
+      active.forEach((i, a) => {
+        const w = ws[i] / wsum, px = pix[a], luma = lumas[a], g = gains[a];
+        for (let p = 0, j = 0; p < px4; p++, j += 4) {
+          let r = avgLuma[p] / Math.max(luma[p], 4);
+          r = r < 0.6 ? 0.6 : r > 1.7 ? 1.7 : r;
+          const s = w * r;
+          acc[j] += px[j] * g[0] * s;
+          acc[j + 1] += px[j + 1] * g[1] * s;
+          acc[j + 2] += px[j + 2] * g[2] * s;
+        }
+      });
+      const img = ctx.createImageData(size, size);
+      const o = img.data;
+      for (let j = 0; j < n; j += 4) {
+        o[j] = acc[j]; o[j + 1] = acc[j + 1]; o[j + 2] = acc[j + 2]; o[j + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    // Unsharp mask with a 3×3 box blur, to win back detail lost to averaging.
+    function sharpen(ctx, size, amount) {
+      const img = ctx.getImageData(0, 0, size, size);
+      const d = img.data, src = new Uint8ClampedArray(d), W = size * 4;
+      for (let y = 1; y < size - 1; y++) {
+        for (let x = 1; x < size - 1; x++) {
+          const i = (y * size + x) * 4;
+          for (let c = 0; c < 3; c++) {
+            const j = i + c;
+            const blur = (src[j - W - 4] + src[j - W] + src[j - W + 4] + src[j - 4] + src[j] + src[j + 4] +
+              src[j + W - 4] + src[j + W] + src[j + W + 4]) / 9;
+            d[j] = src[j] + amount * (src[j] - blur);
+          }
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    function render(size) {
+      const st = mergeState();
+      if (!st) return;
+      const k = size / SIZE;
+      composite(out, size, st, st.target);
+      outCtx.setTransform(k, 0, 0, k, 0, 0);
+      if (cropEl.checked) featherFace(outCtx, st.target);
+      if (meshEl.checked) drawMesh(st.target, k);
+      outCtx.setTransform(1, 0, 0, 1, 0, 0);
+      renderAge(size, st);
+    }
+
+    // Bounding ellipse of the face oval landmarks.
+    function ovalOf(pts) {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const i of FACE_OVAL) {
         x0 = Math.min(x0, pts[i].x); y0 = Math.min(y0, pts[i].y);
         x1 = Math.max(x1, pts[i].x); y1 = Math.max(y1, pts[i].y);
       }
-      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2 - (y1 - y0) * 0.06;
-      const rx = (x1 - x0) / 2 * 1.12, ry = (y1 - y0) / 2 * 1.2;
-      outCtx.save();
-      outCtx.globalCompositeOperation = 'destination-in';
-      outCtx.translate(cx, cy);
-      outCtx.scale(rx / ry, 1);
-      const g = outCtx.createRadialGradient(0, 0, ry * 0.82, 0, 0, ry * 1.12);
+      return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, rx: (x1 - x0) / 2, ry: (y1 - y0) / 2 };
+    }
+
+    // Fill an elliptical radial gradient (opaque inside `inner`, clear past `outer`, as fractions of ry).
+    function fillEllipse(ctx, o, inner, outer) {
+      ctx.save();
+      ctx.translate(o.cx, o.cy);
+      ctx.scale(o.rx / o.ry, 1);
+      const g = ctx.createRadialGradient(0, 0, o.ry * inner, 0, 0, o.ry * outer);
       g.addColorStop(0, 'rgba(0,0,0,1)');
       g.addColorStop(1, 'rgba(0,0,0,0)');
-      outCtx.fillStyle = g;
-      outCtx.fillRect(-SIZE * 2, -SIZE * 2, SIZE * 4, SIZE * 4);
-      outCtx.restore();
+      ctx.fillStyle = g;
+      ctx.fillRect(-SIZE * 2, -SIZE * 2, SIZE * 4, SIZE * 4);
+      ctx.restore();
+    }
+
+    function featherFace(ctx, pts) {
+      const o = ovalOf(pts);
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-in';
+      fillEllipse(ctx, { cx: o.cx, cy: o.cy - o.ry * 0.12, rx: o.rx * 1.12, ry: o.ry * 1.2 }, 0.82, 1.12);
+      ctx.restore();
+    }
+
+    // ---------- baby & aging ----------
+
+    const AGE_STAGES = ['baby', 'toddler', 'teen', 'adult', 'grandparent'];
+    // Keyframes. Geometry: lower-face height, jaw width, eye/nose/mouth scale, forehead height, lip
+    // thickness, jowls, brow drop. Texture: skin smoothing, warm tint, wrinkles, gray hair.
+    const AGE_KEYS = [
+      { lower: 0.72, jaw: 0.86, eye: 1.22, nose: 0.70, mouth: 0.80, forehead: 1.08, lip: 1.00, jowl: 0, brow: 0, cheek: 1.0, smooth: 0.85, warm: 1.0, wrinkle: 0, gray: 0 },
+      { lower: 0.80, jaw: 0.90, eye: 1.14, nose: 0.80, mouth: 0.86, forehead: 1.05, lip: 1.00, jowl: 0, brow: 0, cheek: 0.7, smooth: 0.60, warm: 0.6, wrinkle: 0, gray: 0 },
+      { lower: 0.94, jaw: 0.96, eye: 1.04, nose: 0.94, mouth: 0.96, forehead: 1.01, lip: 1.00, jowl: 0, brow: 0, cheek: 0.2, smooth: 0.25, warm: 0.15, wrinkle: 0, gray: 0 },
+      { lower: 1.00, jaw: 1.00, eye: 1.00, nose: 1.00, mouth: 1.00, forehead: 1.00, lip: 1.00, jowl: 0, brow: 0, cheek: 0, smooth: 0, warm: 0, wrinkle: 0, gray: 0 },
+      { lower: 1.03, jaw: 1.03, eye: 0.94, nose: 1.08, mouth: 0.98, forehead: 1.00, lip: 0.72, jowl: 1, brow: 0.08, cheek: 0, smooth: 0, warm: 0, wrinkle: 1, gray: 1 },
+    ];
+
+    function ageParams(v) {
+      const i = Math.min(AGE_KEYS.length - 2, Math.floor(v)), f = v - i;
+      const A = AGE_KEYS[i], B = AGE_KEYS[i + 1], p = {};
+      for (const key in A) p[key] = A[key] + (B[key] - A[key]) * f;
+      return p;
+    }
+
+    const avgPt = (pts, ids) => {
+      let x = 0, y = 0;
+      for (const i of ids) { x += pts[i].x; y += pts[i].y; }
+      return { x: x / ids.length, y: y / ids.length };
+    };
+
+    function faceAnchors(pts) {
+      const eyeL = mid(pts, L_EYE), eyeR = mid(pts, R_EYE);
+      return {
+        eyeL, eyeR,
+        d: Math.hypot(eyeR.x - eyeL.x, eyeR.y - eyeL.y),
+        cx: (eyeL.x + eyeR.x) / 2,
+        eyeY: (eyeL.y + eyeR.y) / 2,
+        nose: avgPt(pts, [1, 6]),
+        mouth: avgPt(pts, [13, 14]),
+        chinY: pts[152].y,
+        browL: avgPt(pts, [70, 63, 105, 66, 107]),
+        browR: avgPt(pts, [300, 293, 334, 296, 336]),
+        faceW: pts[454].x - pts[234].x,
+      };
+    }
+
+    // Reshape a landmark set toward the proportions of a given age.
+    function ageShape(pts, p) {
+      const A = faceAnchors(pts);
+      const span = A.chinY - A.eyeY;
+      const fall = (q, c, r) => Math.exp(-((q.x - c.x) ** 2 + (q.y - c.y) ** 2) / (r * r));
+      return pts.map((q, idx) => {
+        if (idx >= 478) return q; // frame points stay put
+        let dx = 0, dy = 0;
+        // Local scaling around features, with a Gaussian falloff so the skin around them bends smoothly.
+        for (const c of [A.eyeL, A.eyeR]) {
+          const w = fall(q, c, 0.32 * A.d);
+          dx += (q.x - c.x) * (p.eye - 1) * w;
+          dy += (q.y - c.y) * (p.eye - 1) * w;
+        }
+        let w = fall(q, A.nose, 0.45 * A.d);
+        dx += (q.x - A.nose.x) * (p.nose - 1) * w;
+        dy += (q.y - A.nose.y) * (p.nose - 1) * w;
+        w = fall(q, A.mouth, 0.5 * A.d);
+        dx += (q.x - A.mouth.x) * (p.mouth - 1) * w;
+        dy += (q.y - A.mouth.y) * (p.mouth * p.lip - 1) * w;
+        for (const c of [A.browL, A.browR]) dy += p.brow * A.d * fall(q, c, 0.35 * A.d);
+
+        let x = q.x + dx, y = q.y + dy;
+        if (y > A.eyeY) {
+          // Kids: shorter, narrower lower face. Old age: jowls sag and widen away from the chin.
+          const t = Math.min(1, (y - A.eyeY) / span);
+          y = A.eyeY + (y - A.eyeY) * p.lower;
+          // Narrowing concentrates at the chin, and kids' cheeks puff out, for a rounder face.
+          x = A.cx + (x - A.cx) * (1 - (1 - p.jaw) * t * t);
+          const side0 = Math.min(1, Math.abs(x - A.cx) / (A.faceW / 2));
+          x += Math.sign(x - A.cx) * p.cheek * 0.05 * A.faceW * Math.sin(Math.PI * t) * side0;
+          if (p.jowl) {
+            const side = Math.min(1, Math.abs(x - A.cx) / (A.faceW / 2));
+            const jw = Math.max(0, (t - 0.5) / 0.5) * side;
+            y += p.jowl * 0.05 * span * jw;
+            x += Math.sign(x - A.cx) * p.jowl * 0.03 * A.faceW * jw;
+          }
+        } else {
+          y = A.eyeY + (y - A.eyeY) * p.forehead;
+        }
+        return { x, y };
+      });
+    }
+
+    const tmpSmall = document.createElement('canvas');
+    const tmpFull = document.createElement('canvas');
+
+    // Soft skin: blend in a blurred copy (downscale + upscale works everywhere), keeping features sharp.
+    function smoothSkin(ctx, size, pts, amount, k) {
+      const small = Math.max(16, Math.round(size / 6));
+      tmpSmall.width = tmpSmall.height = small;
+      const a = tmpSmall.getContext('2d');
+      a.imageSmoothingQuality = 'high';
+      a.drawImage(ctx.canvas, 0, 0, small, small);
+      tmpFull.width = tmpFull.height = size;
+      const b = tmpFull.getContext('2d');
+      b.imageSmoothingQuality = 'high';
+      b.drawImage(tmpSmall, 0, 0, size, size);
+      const A = faceAnchors(pts);
+      b.setTransform(k, 0, 0, k, 0, 0);
+      b.globalCompositeOperation = 'destination-out';
+      // Brows aren't protected, so they soften and fade like a child's.
+      for (const [c, r] of [[A.eyeL, 0.34 * A.d], [A.eyeR, 0.34 * A.d], [A.mouth, 0.3 * A.d], [A.nose, 0.28 * A.d]]) {
+        const g = b.createRadialGradient(c.x, c.y, r * 0.45, c.x, c.y, r);
+        g.addColorStop(0, 'rgba(0,0,0,1)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        b.fillStyle = g;
+        b.fillRect(c.x - r, c.y - r, 2 * r, 2 * r);
+      }
+      ctx.globalAlpha = 0.75 * amount;
+      ctx.drawImage(tmpFull, 0, 0);
+      ctx.globalAlpha = 1;
+    }
+
+    function tint(ctx, size, mode, color) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = mode;
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, size, size);
+      ctx.restore();
+    }
+
+    // Gray hair: desaturate and lighten everything outside the face oval.
+    function grayHair(ctx, size, pts, amount, k) {
+      tmpFull.width = tmpFull.height = size;
+      const b = tmpFull.getContext('2d');
+      b.drawImage(ctx.canvas, 0, 0);
+      tint(b, size, 'saturation', `rgba(128,128,128,${amount})`);
+      tint(b, size, 'screen', `rgba(140,140,140,${0.3 * amount})`);
+      b.setTransform(k, 0, 0, k, 0, 0);
+      b.globalCompositeOperation = 'destination-out';
+      // The outline's top point sits mid-forehead, so stretch the protected skin area up toward the hairline.
+      const o = ovalOf(pts);
+      fillEllipse(b, { cx: o.cx, cy: o.cy - o.ry * 0.14, rx: o.rx * 1.02, ry: o.ry * 1.16 }, 0.84, 1.0);
+      ctx.drawImage(tmpFull, 0, 0);
+    }
+
+    // Wrinkles anchored to landmarks: forehead lines, crow's feet, eye bags, smile and marionette lines.
+    function drawWrinkles(ctx, pts, s, k) {
+      const A = faceAnchors(pts), d = A.d, P = (i) => pts[i];
+      const paths = [];
+      const browTop = Math.min(A.browL.y, A.browR.y), top = pts[10].y;
+      [0.28, 0.5, 0.72].forEach((f, j) => {
+        const y = browTop - d * f;
+        if (y < top + 0.12 * d) return;
+        const w = d * (0.6 - j * 0.06);
+        paths.push([[A.cx - w, y + 0.06 * d], [A.cx, y - 0.06 * d], [A.cx + w, y + 0.06 * d]]);
+      });
+      for (const [i, dir] of [[33, -1], [263, 1]]) {
+        const c = P(i);
+        for (const ang of [-0.45, 0, 0.45]) {
+          const L = 0.22 * d, x0 = c.x + dir * 0.06 * d, y0 = c.y;
+          const x1 = x0 + dir * Math.cos(ang) * L, y1 = y0 + Math.sin(ang) * L;
+          paths.push([[x0, y0], [(x0 + x1) / 2, (y0 + y1) / 2 + 0.02 * d], [x1, y1]]);
+        }
+      }
+      for (const [inner, outer, lower] of [[133, 33, 145], [362, 263, 374]]) {
+        const a = P(inner), b = P(outer), l = P(lower);
+        paths.push([[a.x, a.y + 0.12 * d], [l.x, l.y + 0.24 * d], [b.x, b.y + 0.1 * d]]);
+      }
+      for (const [wing, corner, dir] of [[129, 61, -1], [358, 291, 1]]) {
+        const a = P(wing), b = P(corner);
+        paths.push([[a.x + dir * 0.05 * d, a.y], [b.x + dir * 0.22 * d, (a.y + b.y) / 2], [b.x + dir * 0.1 * d, b.y + 0.18 * d]]);
+      }
+      for (const [corner, dir] of [[61, -1], [291, 1]]) {
+        const b = P(corner);
+        paths.push([[b.x + dir * 0.03 * d, b.y + 0.05 * d], [b.x + dir * 0.06 * d, b.y + 0.2 * d], [b.x + dir * 0.04 * d, b.y + 0.36 * d]]);
+      }
+      const stroke = (color, off, width) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        for (const [a, c, b] of paths) {
+          ctx.moveTo(a[0], a[1] + off);
+          ctx.quadraticCurveTo(c[0], c[1] + off, b[0], b[1] + off);
+        }
+        ctx.stroke();
+      };
+      ctx.save();
+      ctx.setTransform(k, 0, 0, k, 0, 0);
+      // Keep every line inside the face outline.
+      ctx.beginPath();
+      FACE_OVAL.forEach((i, j) => (j ? ctx.lineTo(pts[i].x, pts[i].y) : ctx.moveTo(pts[i].x, pts[i].y)));
+      ctx.closePath();
+      ctx.clip();
+      ctx.lineCap = 'round';
+      ctx.filter = `blur(${1.6 * k}px)`;
+      ctx.globalCompositeOperation = 'multiply';
+      stroke(`rgba(120, 80, 65, ${0.32 * s})`, 0, 3.2);
+      ctx.filter = `blur(${0.6 * k}px)`;
+      stroke(`rgba(105, 65, 50, ${0.28 * s})`, 0, 1.2);
+      ctx.filter = `blur(${1.2 * k}px)`;
+      ctx.globalCompositeOperation = 'screen';
+      stroke(`rgba(255, 235, 220, ${0.18 * s})`, 2.2, 2.4);
+      ctx.restore();
+    }
+
+    function renderAge(size, st) {
+      st = st || mergeState();
+      if (!st) return;
+      const v = ageSlider.value / 100;
+      const p = ageParams(v);
+      ageOut.textContent = AGE_STAGES[Math.round(v)];
+      const target = ageShape(st.target, p);
+      const ctx = composite(ageCanvas, size, st, target);
+      const k = size / SIZE;
+      if (p.smooth > 0.01) smoothSkin(ctx, size, target, p.smooth, k);
+      if (p.warm > 0.01) tint(ctx, size, 'soft-light', `rgba(255, 185, 170, ${0.35 * p.warm})`);
+      if (p.gray > 0.01) {
+        tint(ctx, size, 'saturation', `rgba(128,128,128,${0.25 * p.gray})`);
+        grayHair(ctx, size, target, p.gray, k);
+      }
+      if (p.wrinkle > 0.01) drawWrinkles(ctx, target, p.wrinkle, k);
+      ctx.setTransform(k, 0, 0, k, 0, 0);
+      if (cropEl.checked) featherFace(ctx, target);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+
+    let agePending = false;
+    function scheduleAge() {
+      if (agePending) return;
+      agePending = true;
+      requestAnimationFrame(() => { agePending = false; renderAge(SIZE); });
     }
 
     function drawMesh(pts, k) {
@@ -775,7 +1196,9 @@
 
       const ready = list.length >= 2;
       resultBox.classList.toggle('ready', ready);
+      ageBox.classList.toggle('ready', ready);
       downloadBtn.disabled = !ready;
+      ageDownloadBtn.disabled = !ready;
       equalBtn.disabled = list.length < 2;
       if (ready) scheduleRender(SIZE);
     }
@@ -795,20 +1218,28 @@
       if (files.length) addBlobs(files);
     });
 
-    [shapeFromEl, meshEl, cropEl].forEach((el) => el.addEventListener('input', () => scheduleRender(SIZE)));
+    [shapeFromEl, meshEl, cropEl, seamlessEl].forEach((el) => el.addEventListener('input', () => scheduleRender(SIZE)));
     equalBtn.addEventListener('click', () => entries.forEach((e) => setWeight(e, 50, false)));
 
-    downloadBtn.addEventListener('click', () => {
-      render(SIZE);
-      out.toBlob((blob) => {
+    function downloadCanvas(canvas, name) {
+      canvas.toBlob((blob) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `face-merge-${readyEntries().length}.png`;
+        a.download = name;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }, 'image/png');
+    }
+    downloadBtn.addEventListener('click', () => {
+      render(SIZE);
+      downloadCanvas(out, `face-merge-${readyEntries().length}.png`);
     });
+    ageDownloadBtn.addEventListener('click', () => {
+      render(SIZE);
+      downloadCanvas(ageCanvas, `face-merge-${AGE_STAGES[Math.round(ageSlider.value / 100)]}.png`);
+    });
+    ageSlider.addEventListener('input', scheduleAge);
 
     // Debug/testing: ?f=path1,path2,… (or ?a=&b=) loads same-origin images.
     const params = new URLSearchParams(location.search);
@@ -822,9 +1253,11 @@
         .catch(() => flashNote("couldn't load test images"));
     }
     if (params.get('mesh')) meshEl.checked = true;
+    if (params.get('age')) ageSlider.value = params.get('age');
+    if (params.get('seamless') === '0') seamlessEl.checked = false;
 
     // Exposed for tests.
-    window.faceMerge = { entries: () => entries, setWeight, render, removeEntry, refresh };
+    window.faceMerge = { entries: () => entries, addBlobs, setWeight, render, renderAge, removeEntry, refresh };
 
     refresh();
   </script>

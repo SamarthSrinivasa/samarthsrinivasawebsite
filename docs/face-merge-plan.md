@@ -53,3 +53,65 @@ See `face-merge-design.md` for the design.
    - Check uneven weights, "shape from" a single face, removing a face and the no-face card.
    - Time one 10-face render.
    - Check the mobile layout.
+
+---
+
+# Update plan: baby & aging
+
+1. **Refactor `render`** into three parts:
+   - `mergeState()`: ready faces, normalized weights and target points; triangulation is cached
+   - `composite(canvas, size, state, target)`: warp every face onto `target` and take the weighted average
+   - `render()`: the merged view (feather and mesh), which then calls `renderAge()`
+   - `featherFace` takes the context it draws on.
+2. **Markup.** A "baby & aging" panel under "merged" with:
+   - an age canvas
+   - an age slider (0–400) with stage labels and the current stage name
+   - a download button and a short honesty note
+
+   The result-canvas CSS gets generalized so both canvases share it.
+3. **Age model.**
+   - `AGE_KEYS` keyframes and `ageParams(v)` interpolation
+   - `faceAnchors(pts)`: eye centers, interocular distance, nose, mouth, chin, brows, face width
+   - `ageShape(pts, p)`: local Gaussian scaling plus the global lower-face, jaw, forehead and jowl transforms
+4. **Texture passes:**
+   - `smoothSkin` (downscale blur, masked away from eyes, nose and mouth)
+   - warm soft-light tint
+   - skin desaturation
+   - `grayHair` (outside-oval mask)
+   - `drawWrinkles` (landmark-anchored quadratic strokes)
+   - then the feather
+5. **Wiring.**
+   - The age slider redraws only the age canvas.
+   - Weight, shape and fade changes redraw both canvases.
+   - Download saves `face-merge-<stage>.png`.
+   - Add a `?age=` debug parameter.
+6. **Copy.** Add a "5. baby & aging" step to how-it-works.
+7. **Test.**
+   - With 2 parents and with 10 faces, save strips at all five stages plus two in-between values.
+   - Check fade on and off, timing, mobile layout and the console.
+
+---
+
+# Update plan: seamless merging (done)
+
+1. In `alignFace`, add an outer ring of 36 points (the face outline ×1.35 from its center, kept inside the frame) and the soft warnings (head turned, mouth open, small face). Show the warnings on the card.
+2. `composite` warps the active faces, then runs either:
+   - `blendEven` when "seamless blend" is on: a per-face color gain measured on the central face box, plus a local luma ratio against the group's average low frequencies (1/16-scale blur, clamped to [0.6, 1.7]), or
+   - the old alpha running average when it's off.
+3. Then `sharpen` (3×3 unsharp mask, amount 0.35) when seamless is on.
+4. Add a "seamless blend" checkbox (default on) and a `?seamless=0` debug parameter.
+5. Use `willReadFrequently` canvases for pixel readback.
+
+The first version corrected each RGB channel locally. It caused a green tint where a white background met dark hair, so it was replaced with a single color gain per face plus a luma-only local ratio.
+
+Timing is about 40 ms per canvas for 2 faces and about 135 ms per canvas for 10 faces at 512 px. Weight dragging renders at 256 px.
+
+## Testing data
+
+| Set | What | License / terms | Fit |
+| --- | --- | --- | --- |
+| Face Research Lab London Set (DeBruine & Jones, 2017, figshare 10.6084/m9.figshare.5047666) | 102 adults, front-facing, neutral and smiling, 1350×1350, with age, gender and ethnicity | Reported as CC BY 4.0 (check the figshare license field before use) | Best fit. Consistent, consented photos with a range of ages and ethnicities. |
+| Chicago Face Database | ~600 standardized portraits | Research-only. Terms bar file-hosting redistribution and uploading to AI and cloud services. | Avoid. It doesn't fit a public demo page. |
+| CelebA / FFHQ | Large web-scraped celebrity / Flickr sets | Non-commercial research terms; photos of people who never opted in | Avoid for a personal site. |
+
+Plan: download the London Set into `.face-test/frll/` (git-ignored) and run a batch script that merges random pairs and tens. It saves contact sheets, so lighting, pose and aging changes can be compared before and after. Nothing from the set gets committed or published.
